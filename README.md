@@ -1,44 +1,79 @@
 # agentdef
 
-> Built on the design of [open-gitagent](https://github.com/open-gitagent/gitagent) (MIT). agentdef is a clean-room reimplementation, scoped to the two instruction formats that matter and extended with a format-drift watcher. Licensed MIT.
+**Define an AI agent once. Generate the config every tool expects.**
 
-Define an AI agent once, generate the config every tool expects.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![format-drift watch](https://github.com/noord-agency/agentdef/actions/workflows/format-watch.yml/badge.svg)](https://github.com/noord-agency/agentdef/actions/workflows/format-watch.yml)
 
-`agentdef` takes one definition (`agent.yaml` + `SOUL.md` + `RULES.md` + `skills/`) and generates the instruction file each AI coding tool reads:
+_A clean-room reimplementation built on the design of [open-gitagent](https://github.com/open-gitagent/gitagent) (MIT), scoped to the two instruction formats that matter in practice and extended with a format-drift watcher._
 
-- `CLAUDE.md` for Claude Code
-- `AGENTS.md` for Codex, Cursor, Kimi, Grok, Antigravity, Windsurf, Zed, Aider, and the rest of the AGENTS.md standard
-- `GEMINI.md` for Gemini CLI
-- `.cursor/rules/*.mdc` for Cursor's native rules
+agentdef turns one agent definition into the instruction file each AI coding tool reads, so your agent's identity, rules, and skills stay consistent across every tool, and you are never locked into a single vendor.
 
-Plus `extends`-based inheritance across repos, and a deterministic watcher that flags when a tool changes its format.
+```bash
+npm install -g "git+https://github.com/noord-agency/agentdef.git#v0.1.0"
+
+agentdef export --format claude-code     # -> CLAUDE.md
+agentdef export --format agents          # -> AGENTS.md
+```
+
+## The idea
+
+Write your agent once:
+
+```
+agent.yaml      name, description, model, extends
+SOUL.md         identity, voice, persona
+RULES.md        constraints and operating rules
+skills/         one folder per skill, each with a SKILL.md
+```
+
+agentdef generates whatever each tool reads from that single source. No parallel copies to maintain, no drift between tools.
+
+## Supported tools
+
+| Run | Emits | Read by |
+|-----|-------|---------|
+| `--format claude-code` | `CLAUDE.md` | Claude Code |
+| `--format agents` | `AGENTS.md` | Codex, Cursor, Kimi, Grok, Antigravity, Windsurf, Zed, Aider, and the rest of the AGENTS.md standard |
+| `--format gemini` | `GEMINI.md` | Gemini CLI |
+| `--format cursor` | `.cursor/rules/*.mdc` | Cursor (native rules) |
+
+`agents` has aliases for the tools that read AGENTS.md, so `--format kimi`, `--format grok`, and `--format codex` all produce the same `AGENTS.md`.
 
 ## Why only two formats
 
-The AI-coding ecosystem converged on essentially two instruction-file formats: **AGENTS.md** (a standard read by 30+ tools) and **CLAUDE.md**. Define once, run in any tool, switch freely, no single-vendor lock-in. Model-lab CLIs (Kimi, Grok) and models accessed through other harnesses (GLM) read these same files rather than inventing their own.
+The AI-coding ecosystem converged on essentially two instruction-file formats: **AGENTS.md** (now a standard read by 30+ tools) and **CLAUDE.md**. Define once, run in any tool, switch freely. Even the model-lab CLIs (Kimi, Grok) and models reached through other harnesses (GLM) read these same files rather than inventing their own. That convergence is why agentdef can stay small and still cover the field.
 
-## Install
-
-```bash
-npm install -g agentdef
-```
-
-## Usage
+## Commands
 
 ```bash
-agentdef export --format claude-code     # -> CLAUDE.md
-agentdef export --format agents          # -> AGENTS.md (alias: kimi, grok, codex, ...)
-agentdef export --format gemini          # -> GEMINI.md
-agentdef export --format cursor          # -> .cursor/rules/*.mdc
-agentdef install                         # resolve `extends:` parents
-agentdef validate                        # check the definition (fail-loud)
-agentdef watch                           # detect upstream format drift
+agentdef export --format <claude-code|agents|gemini|cursor> [--dir .] [--out FILE]
+agentdef install      # resolve `extends:` parents into .gitagent/parent
+agentdef validate     # check the definition (fail-loud); enforces provider:model
+agentdef watch        # detect upstream format drift
 ```
+
+Status goes to stderr and only generated content to stdout, so `agentdef export -f claude-code > CLAUDE.md` is clean.
+
+## Inheritance
+
+A repo can inherit a shared agent definition:
+
+```yaml
+# agent.yaml
+extends: https://github.com/your-org/base-agent.git
+```
+
+`agentdef install` clones the parent. On generation: `SOUL.md` from the child replaces the parent's, `RULES.md` is the union (parent first), and skills merge with the child winning on name collisions.
 
 ## Format-drift watcher
 
-`agentdef watch` fingerprints each tool's published format and compares it to a stored baseline. Deterministic, no LLM, no API key. On drift it exits non-zero so CI can open an issue; the adapter fix is reviewed by a human (see `.github/workflows/format-watch.yml`).
+Tools occasionally change their config format. `agentdef watch` fingerprints each tool's published format and compares it to a stored baseline. Deterministic, no LLM, no API key. It exits non-zero when something changes, so CI can open an issue and a human can update the affected adapter. See [`.github/workflows/format-watch.yml`](.github/workflows/format-watch.yml).
+
+## Models
+
+Models are a config value, not an emission target. Set `model: provider:model` in `agent.yaml` (for example `anthropic:claude-opus-4-7`, `zhipu:glm-4.6`, `moonshot:kimi-k2`); `validate` enforces the `provider:model` form. The endpoint and credentials for a given model live in your own machine config, never generated by agentdef.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). Built and maintained by noord.
