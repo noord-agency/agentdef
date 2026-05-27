@@ -1,7 +1,7 @@
 import { join, resolve } from 'node:path';
 import { loadAgentManifest, loadFileIfExists } from './loader.js';
 import { resolveIdentity } from './merge.js';
-import { loadAllSkills, getAllowedTools } from './skills.js';
+import { collectSkills, getAllowedTools } from './skills.js';
 export function buildInstructionDoc(dir, opts = {}) {
     const agentDir = resolve(dir);
     const manifest = loadAgentManifest(agentDir);
@@ -23,7 +23,7 @@ export function buildInstructionDoc(dir, opts = {}) {
         parts.push(duty);
         parts.push('');
     }
-    const skills = loadAllSkills(join(agentDir, 'skills'));
+    const skills = collectSkills(agentDir);
     if (skills.length > 0) {
         parts.push('## Skills');
         parts.push('');

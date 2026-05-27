@@ -1,11 +1,12 @@
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import yaml from 'js-yaml';
 import { loadAgentManifest, loadFileIfExists } from '../loader.js';
-import { loadAllSkills, getAllowedTools } from '../skills.js';
+import { collectSkills, getAllowedTools } from '../skills.js';
 // Cursor is the one tool needing real translation rather than a single file: it
 // reads .cursor/rules/*.mdc, one always-applied global rule (SOUL + RULES) plus
-// one rule per skill. Emitted as a multi-file stream the sync layer splits into
-// files. Unlike the single-file adapters, Cursor does not read root SOUL/RULES.
+// one rule per skill. `sync` writes these files directly; `export` emits them as
+// a single stream. Unlike the single-file adapters, Cursor does not read root
+// SOUL/RULES, so the global rule carries them.
 function slugify(name) {
     return name
         .toLowerCase()
@@ -22,8 +23,8 @@ function buildMdcFile(frontmatter, body) {
     return `---\n${fm}\n---\n\n${body.trim()}\n`;
 }
 function buildGlobalRule(agentDir, description) {
-    const soul = loadFileIfExists(join(agentDir, 'SOUL.md'));
-    const rules = loadFileIfExists(join(agentDir, 'RULES.md'));
+    const soul = loadFileIfExists(`${agentDir}/SOUL.md`);
+    const rules = loadFileIfExists(`${agentDir}/RULES.md`);
     if (!soul && !rules)
         return null;
     const body = [];
@@ -59,22 +60,31 @@ function buildSkillRule(skill) {
         content: buildMdcFile(frontmatter, body.join('\n')),
     };
 }
-export function exportToCursor(dir) {
+function buildRules(dir) {
     const agentDir = resolve(dir);
     const manifest = loadAgentManifest(agentDir);
     const rules = [];
-    // Note: the global rule is filenamed off the agent name in upstream; we follow
-    // that, slugifying the manifest name for the always-applied rule.
     const globalRule = buildGlobalRule(agentDir, manifest.description);
     if (globalRule) {
         globalRule.filename = `${slugify(manifest.name)}.mdc`;
         rules.push(globalRule);
     }
-    for (const skill of loadAllSkills(join(agentDir, 'skills'))) {
+    for (const skill of collectSkills(agentDir)) {
         rules.push(buildSkillRule(skill));
     }
+    return rules;
+}
+// For `agentdef sync`: the actual files to write, relative to the agent dir.
+export function exportToCursorFiles(dir) {
+    return buildRules(dir).map((rule) => ({
+        path: `.cursor/rules/${rule.filename}`,
+        content: rule.content,
+    }));
+}
+// For `agentdef export -f cursor`: a single multi-file stream.
+export function exportToCursor(dir) {
     const parts = [];
-    for (const rule of rules) {
+    for (const rule of buildRules(dir)) {
         parts.push(`# === .cursor/rules/${rule.filename} ===`);
         parts.push(rule.content);
         parts.push('');

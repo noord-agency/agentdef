@@ -1,6 +1,6 @@
 {
   "name": "agentdef",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Define an AI agent once, generate the config file every tool expects (CLAUDE.md, AGENTS.md). Implements the AGENTS.md standard. Prior art: open-gitagent (MIT).",
   "type": "module",
   "bin": {

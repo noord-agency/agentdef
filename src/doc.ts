@@ -1,7 +1,7 @@
 import { join, resolve } from 'node:path';
 import { loadAgentManifest, loadFileIfExists } from './loader.js';
 import { resolveIdentity } from './merge.js';
-import { loadAllSkills, getAllowedTools } from './skills.js';
+import { collectSkills, getAllowedTools } from './skills.js';
 
 // Shared builder for single-file instruction docs (AGENTS.md, GEMINI.md): one
 // flat document with identity + SOUL + RULES + every skill inlined. Optional
@@ -36,7 +36,7 @@ export function buildInstructionDoc(dir: string, opts: DocOptions = {}): string 
     parts.push('');
   }
 
-  const skills = loadAllSkills(join(agentDir, 'skills'));
+  const skills = collectSkills(agentDir);
   if (skills.length > 0) {
     parts.push('## Skills');
     parts.push('');

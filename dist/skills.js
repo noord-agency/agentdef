@@ -1,6 +1,7 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import yaml from 'js-yaml';
+import { collectSourceRoots } from './sources.js';
 // The `allowed-tools` frontmatter value is a whitespace-delimited string.
 // Splitting on whitespace (not commas) preserves whatever punctuation authors
 // wrote, which is what reproduces the existing output verbatim.
@@ -67,4 +68,34 @@ export function loadAllSkillMetadata(skillsDir) {
 }
 export function loadAllSkills(skillsDir) {
     return eachSkill(skillsDir, parseSkillMd);
+}
+// Merged across local skills/ + the extends parent + deps, deduped by name with
+// local winning. Adapters use these so inherited skills appear in client repos.
+// For a base repo with no extends, the result equals the local skills/ unchanged.
+export function collectSkillMetadata(agentDir) {
+    const seen = new Set();
+    const out = [];
+    for (const root of collectSourceRoots(agentDir, 'skills')) {
+        for (const skill of eachSkill(root, loadSkillMetadata)) {
+            if (seen.has(skill.name))
+                continue;
+            seen.add(skill.name);
+            out.push(skill);
+        }
+    }
+    return out;
+}
+export function collectSkills(agentDir) {
+    const seen = new Set();
+    const out = [];
+    for (const root of collectSourceRoots(agentDir, 'skills')) {
+        for (const skill of eachSkill(root, parseSkillMd)) {
+            const name = String(skill.frontmatter.name);
+            if (seen.has(name))
+                continue;
+            seen.add(name);
+            out.push(skill);
+        }
+    }
+    return out;
 }

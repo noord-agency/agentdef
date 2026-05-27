@@ -2,6 +2,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import yaml from 'js-yaml';
 import type { SkillMetadata } from './types.js';
+import { collectSourceRoots } from './sources.js';
 
 export interface SkillFull {
   frontmatter: Record<string, unknown>;
@@ -76,4 +77,34 @@ export function loadAllSkillMetadata(skillsDir: string): SkillMetadata[] {
 
 export function loadAllSkills(skillsDir: string): SkillFull[] {
   return eachSkill(skillsDir, parseSkillMd);
+}
+
+// Merged across local skills/ + the extends parent + deps, deduped by name with
+// local winning. Adapters use these so inherited skills appear in client repos.
+// For a base repo with no extends, the result equals the local skills/ unchanged.
+export function collectSkillMetadata(agentDir: string): SkillMetadata[] {
+  const seen = new Set<string>();
+  const out: SkillMetadata[] = [];
+  for (const root of collectSourceRoots(agentDir, 'skills')) {
+    for (const skill of eachSkill(root, loadSkillMetadata)) {
+      if (seen.has(skill.name)) continue;
+      seen.add(skill.name);
+      out.push(skill);
+    }
+  }
+  return out;
+}
+
+export function collectSkills(agentDir: string): SkillFull[] {
+  const seen = new Set<string>();
+  const out: SkillFull[] = [];
+  for (const root of collectSourceRoots(agentDir, 'skills')) {
+    for (const skill of eachSkill(root, parseSkillMd)) {
+      const name = String(skill.frontmatter.name);
+      if (seen.has(name)) continue;
+      seen.add(name);
+      out.push(skill);
+    }
+  }
+  return out;
 }

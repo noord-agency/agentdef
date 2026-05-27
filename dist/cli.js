@@ -9,6 +9,7 @@ import { install } from './install.js';
 import { validate } from './validate.js';
 import { watch } from './watch.js';
 import { FORMAT_SOURCES } from './watch-sources.js';
+import { sync } from './sync.js';
 // Status/logs go to stderr; only generated content goes to stdout. This is the
 // deliberate fix for the upstream bug that leaked log lines into CLAUDE.md.
 function getOpt(long, short) {
@@ -96,8 +97,18 @@ async function main() {
             }
             break;
         }
+        case 'sync': {
+            const adaptersOpt = getOpt('--adapters');
+            const res = sync(dir, {
+                adapters: adaptersOpt ? adaptersOpt.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+            });
+            console.error(`synced for: ${res.adapters.join(', ')}`);
+            for (const w of res.written)
+                console.error(`  ${w}`);
+            break;
+        }
         default:
-            console.error('usage: agentdef <export|install|validate|watch> [--format <claude-code|agents|gemini|cursor>] [--dir .] [--out FILE] [--force] [--update]');
+            console.error('usage: agentdef <sync|export|install|validate|watch> [--format <claude-code|agents|gemini|cursor>] [--adapters a,b,c] [--dir .] [--out FILE] [--force] [--update]');
             process.exit(1);
     }
 }

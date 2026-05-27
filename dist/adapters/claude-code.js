@@ -1,7 +1,7 @@
 import { join, resolve } from 'node:path';
 import { loadAgentManifest, loadFileIfExists } from '../loader.js';
 import { resolveIdentity } from '../merge.js';
-import { loadAllSkillMetadata } from '../skills.js';
+import { collectSkillMetadata } from '../skills.js';
 // Emits CLAUDE.md: identity + SOUL + RULES + a skills index (metadata plus a
 // pointer to each SKILL.md, since Claude Code loads skills on demand) + the model
 // hint. Compliance and knowledge-index sections from the upstream spec are
@@ -20,7 +20,7 @@ export function exportToClaudeCode(dir) {
     const duty = loadFileIfExists(join(agentDir, 'DUTIES.md'));
     if (duty)
         parts.push(duty);
-    const skills = loadAllSkillMetadata(join(agentDir, 'skills'));
+    const skills = collectSkillMetadata(agentDir);
     if (skills.length > 0) {
         const skillParts = ['## Skills\n'];
         for (const skill of skills) {
