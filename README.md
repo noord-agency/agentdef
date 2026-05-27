@@ -38,7 +38,7 @@ agentdef generates whatever each tool reads from that single source. No parallel
 | `--format gemini` | `GEMINI.md` | Gemini CLI |
 | `--format cursor` | `.cursor/rules/*.mdc` | Cursor (native rules) |
 
-`agents` has aliases for the tools that read AGENTS.md, so `--format kimi`, `--format grok`, and `--format codex` all produce the same `AGENTS.md`.
+**`agents` is the canonical format.** It produces the single `AGENTS.md` file every tool in that row reads, define once, run anywhere. The tool names are accepted as aliases (`--format kimi`, `--format grok`, `--format codex` all resolve to the same `AGENTS.md`), so reaching for the tool you know still works, but prefer `agents`.
 
 ## Why only two formats
 
