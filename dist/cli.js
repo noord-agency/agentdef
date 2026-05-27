@@ -10,6 +10,7 @@ import { validate } from './validate.js';
 import { watch } from './watch.js';
 import { FORMAT_SOURCES } from './watch-sources.js';
 import { sync } from './sync.js';
+import { init } from './init.js';
 // Status/logs go to stderr; only generated content goes to stdout. This is the
 // deliberate fix for the upstream bug that leaked log lines into CLAUDE.md.
 function getOpt(long, short) {
@@ -107,8 +108,16 @@ async function main() {
                 console.error(`  ${w}`);
             break;
         }
+        case 'init': {
+            const res = init(dir);
+            console.error(`installed hooks in ${res.hooksDir}: ${res.installed.join(', ')}`);
+            if (res.unsetHooksPath)
+                console.error('unset core.hooksPath so the installed hooks run');
+            console.error('done. agentdef sync now runs automatically after pull/merge/checkout/rebase.');
+            break;
+        }
         default:
-            console.error('usage: agentdef <sync|export|install|validate|watch> [--format <claude-code|agents|gemini|cursor>] [--adapters a,b,c] [--dir .] [--out FILE] [--force] [--update]');
+            console.error('usage: agentdef <init|sync|export|install|validate|watch> [--format <claude-code|agents|gemini|cursor>] [--adapters a,b,c] [--dir .] [--out FILE] [--force] [--update]');
             process.exit(1);
     }
 }
