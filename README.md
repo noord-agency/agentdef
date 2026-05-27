@@ -10,7 +10,7 @@ _A clean-room reimplementation built on the design of [open-gitagent](https://gi
 agentdef turns one agent definition into the instruction file each AI coding tool reads, so your agent's identity, rules, and skills stay consistent across every tool, and you are never locked into a single vendor.
 
 ```bash
-npm install -g "git+https://github.com/noord-agency/agentdef.git#v0.3.0"
+npm install -g @noord-agency/agentdef
 
 agentdef init     # install git hooks: regenerate on pull/merge/checkout
 agentdef sync     # generate configs for the tools in .agent-adapters
