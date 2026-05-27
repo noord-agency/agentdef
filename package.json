@@ -1,5 +1,5 @@
 {
-  "name": "agentdef",
+  "name": "@noord-agency/agentdef",
   "version": "0.3.0",
   "description": "Define an AI agent once, generate the config file every tool expects (CLAUDE.md, AGENTS.md). Implements the AGENTS.md standard. Prior art: open-gitagent (MIT).",
   "type": "module",
