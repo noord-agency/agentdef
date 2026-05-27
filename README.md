@@ -10,10 +10,10 @@ _A clean-room reimplementation built on the design of [open-gitagent](https://gi
 agentdef turns one agent definition into the instruction file each AI coding tool reads, so your agent's identity, rules, and skills stay consistent across every tool, and you are never locked into a single vendor.
 
 ```bash
-npm install -g "git+https://github.com/noord-agency/agentdef.git#v0.1.0"
+npm install -g "git+https://github.com/noord-agency/agentdef.git#v0.3.0"
 
-agentdef export --format claude-code     # -> CLAUDE.md
-agentdef export --format agents          # -> AGENTS.md
+agentdef init     # install git hooks: regenerate on pull/merge/checkout
+agentdef sync     # generate configs for the tools in .agent-adapters
 ```
 
 ## The idea
@@ -44,9 +44,26 @@ agentdef generates whatever each tool reads from that single source. No parallel
 
 The AI-coding ecosystem converged on essentially two instruction-file formats: **AGENTS.md** (now a standard read by 30+ tools) and **CLAUDE.md**. Define once, run in any tool, switch freely. Even the model-lab CLIs (Kimi, Grok) and models reached through other harnesses (GLM) read these same files rather than inventing their own. That convergence is why agentdef can stay small and still cover the field.
 
+## Skills
+
+Skills are the other half of the standard. A skill is a folder with a `SKILL.md` (YAML frontmatter + instructions); the format is shared across tools, so skills are copied, not translated.
+
+You author skills once in `skills/`. Tools never read that folder directly, `agentdef sync` mirrors it into each tool's skills dir:
+
+| Tool | Skills dir |
+|---|---|
+| Claude Code | `.claude/skills/` |
+| Codex, Kimi, Grok, Antigravity | `.agents/skills/` (the cross-tool standard) |
+| Cursor | `.cursor/skills/` |
+| Gemini CLI | `.gemini/skills/` |
+
+Same split as the instruction files: `.agents/skills/` is the shared standard for the AGENTS.md family, the others are tool-specific. There is no single root skills folder that every tool reads; `skills/` is the source, the `.[tool]/skills/` dirs are generated. In the instruction file, `CLAUDE.md` indexes skills with a pointer (Claude Code loads each on demand) while `AGENTS.md` and `GEMINI.md` inline them in full.
+
 ## Commands
 
 ```bash
+agentdef init         # install git hooks that run sync on pull/merge/checkout/rebase
+agentdef sync         # generate every adapter in .agent-adapters + mirror skills/agents
 agentdef export --format <claude-code|agents|gemini|cursor> [--dir .] [--out FILE]
 agentdef install      # resolve `extends:` parents into .gitagent/parent
 agentdef validate     # check the definition (fail-loud); enforces provider:model
