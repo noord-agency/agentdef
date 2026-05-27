@@ -1,4 +1,6 @@
 node_modules/
-dist/
 *.tgz
 .DS_Store
+
+# dist/ is committed on purpose: agentdef is installed via git (npm i -g git+url#tag),
+# so the prebuilt output must be in the repo, no build step on install.

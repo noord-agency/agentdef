@@ -12,8 +12,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "dev": "tsx src/cli.ts",
-    "prepare": "npm run build"
+    "dev": "tsx src/cli.ts"
   },
   "license": "MIT",
   "dependencies": {
