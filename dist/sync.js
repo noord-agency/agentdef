@@ -7,6 +7,7 @@ import { exportToAgentsMd } from './adapters/agents-md.js';
 import { exportToGemini } from './adapters/gemini.js';
 import { exportToCursorFiles } from './adapters/cursor.js';
 import { mirrorSkillDirs, mirrorAgentFiles } from './mirror.js';
+import { LEGACY_AGENTDEF_DIR } from './paths.js';
 // Where each tool reads its skills / sub-agents from.
 const SKILL_DIR = {
     'claude-code': '.claude/skills',
@@ -81,6 +82,14 @@ export function sync(dir, opts = {}) {
     const adapters = readAdapters(agentDir, opts.adapters);
     if (adapters.length === 0)
         throw new Error('no adapters selected');
+    // Migration nudge: the cache dir was renamed .gitagent -> .agentdef. A repo
+    // that still carries the old one hasn't run the new `init` yet, so point the
+    // way. Runs on every sync, including the auto-sync hooks, so it surfaces by
+    // itself. (`agentdef init` does the actual untrack + delete.)
+    const warnings = [];
+    if (existsSync(join(agentDir, LEGACY_AGENTDEF_DIR))) {
+        warnings.push(`warning: legacy ${LEGACY_AGENTDEF_DIR}/ found — run \`agentdef init\` to migrate to .agentdef/`);
+    }
     install(agentDir, { force: true });
     const errors = validate(agentDir).filter((i) => i.level === 'error');
     if (errors.length > 0) {
@@ -102,5 +111,5 @@ export function sync(dir, opts = {}) {
                 written.push(`${agentTargetDir} (${n} agents)`);
         }
     }
-    return { adapters, written };
+    return { adapters, written, warnings };
 }

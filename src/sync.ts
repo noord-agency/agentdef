@@ -7,6 +7,7 @@ import { exportToAgentsMd } from './adapters/agents-md.js';
 import { exportToGemini } from './adapters/gemini.js';
 import { exportToCursorFiles } from './adapters/cursor.js';
 import { mirrorSkillDirs, mirrorAgentFiles } from './mirror.js';
+import { LEGACY_AGENTDEF_DIR } from './paths.js';
 
 // Where each tool reads its skills / sub-agents from.
 const SKILL_DIR: Record<string, string> = {
@@ -79,6 +80,7 @@ function generateInstruction(adapter: string, agentDir: string): string[] {
 export interface SyncResult {
   adapters: string[];
   written: string[];
+  warnings: string[];
 }
 
 // The orchestrator: read the adapter list, resolve extends, validate, then for
@@ -88,6 +90,17 @@ export function sync(dir: string, opts: { adapters?: string[] } = {}): SyncResul
   const agentDir = resolve(dir);
   const adapters = readAdapters(agentDir, opts.adapters);
   if (adapters.length === 0) throw new Error('no adapters selected');
+
+  // Migration nudge: the cache dir was renamed .gitagent -> .agentdef. A repo
+  // that still carries the old one hasn't run the new `init` yet, so point the
+  // way. Runs on every sync, including the auto-sync hooks, so it surfaces by
+  // itself. (`agentdef init` does the actual untrack + delete.)
+  const warnings: string[] = [];
+  if (existsSync(join(agentDir, LEGACY_AGENTDEF_DIR))) {
+    warnings.push(
+      `warning: legacy ${LEGACY_AGENTDEF_DIR}/ found — run \`agentdef init\` to migrate to .agentdef/`,
+    );
+  }
 
   install(agentDir, { force: true });
 
@@ -111,5 +124,5 @@ export function sync(dir: string, opts: { adapters?: string[] } = {}): SyncResul
       if (n > 0) written.push(`${agentTargetDir} (${n} agents)`);
     }
   }
-  return { adapters, written };
+  return { adapters, written, warnings };
 }

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { writeFileSync, readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import updateNotifier from 'update-notifier';
 import { exportToClaudeCode } from './adapters/claude-code.js';
 import { exportToAgentsMd } from './adapters/agents-md.js';
 import { exportToGemini } from './adapters/gemini.js';
@@ -18,7 +20,22 @@ function getOpt(long, short) {
     return i >= 0 ? process.argv[i + 1] : undefined;
 }
 const has = (flag) => process.argv.includes(flag);
+// Nudge users to update the globally installed CLI. update-notifier only prints
+// on a TTY and to stderr, so it never shows in git hooks / pipes / CI and never
+// pollutes `export > file` stdout. Best-effort: an update check must never break
+// the actual command, so any failure here is swallowed.
+function checkForUpdate() {
+    try {
+        const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+        updateNotifier({ pkg }).notify({ isGlobal: true });
+    }
+    catch {
+        // intentionally ignored: the update check is an optional convenience
+    }
+}
 async function main() {
+    checkForUpdate();
     const command = process.argv[2];
     const dir = getOpt('--dir', '-d') ?? '.';
     switch (command) {
@@ -106,6 +123,8 @@ async function main() {
             console.error(`synced for: ${res.adapters.join(', ')}`);
             for (const w of res.written)
                 console.error(`  ${w}`);
+            for (const warning of res.warnings)
+                console.error(warning);
             break;
         }
         case 'init': {
@@ -113,6 +132,10 @@ async function main() {
             console.error(`installed hooks in ${res.hooksDir}: ${res.installed.join(', ')}`);
             if (res.unsetHooksPath)
                 console.error('unset core.hooksPath so the installed hooks run');
+            if (res.gitignoreAdded)
+                console.error('added .agentdef/ to .gitignore (regenerable cache, never commit it)');
+            if (res.legacyRemoved)
+                console.error('migrated: removed legacy .gitagent/ (untracked + deleted); commit the change');
             console.error('done. agentdef sync now runs automatically after pull/merge/checkout/rebase.');
             break;
         }

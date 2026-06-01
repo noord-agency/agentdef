@@ -1,8 +1,51 @@
-import { writeFileSync, chmodSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, chmodSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { AGENTDEF_DIR, LEGACY_AGENTDEF_DIR } from './paths.js';
 function git(args, cwd) {
     return execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
+}
+// Ensure the repo ignores the regenerable cache dir, so .agentdef/ (the
+// materialized extends chain) is never committed. Idempotent: appends the entry
+// only when no matching line already exists. Returns whether it added one.
+function ensureGitignore(cwd) {
+    let toplevel;
+    try {
+        toplevel = git(['rev-parse', '--show-toplevel'], cwd);
+    }
+    catch {
+        return false; // no working tree (e.g. a bare repo); nothing to ignore
+    }
+    const entry = `${AGENTDEF_DIR}/`;
+    const path = join(toplevel, '.gitignore');
+    const existing = existsSync(path) ? readFileSync(path, 'utf-8') : '';
+    const present = existing
+        .split('\n')
+        .map((l) => l.trim())
+        .some((l) => l === entry || l === AGENTDEF_DIR);
+    if (present)
+        return false;
+    const prefix = existing && !existing.endsWith('\n') ? '\n' : '';
+    writeFileSync(path, `${existing}${prefix}${entry}\n`);
+    return true;
+}
+// One-time migration off the old cache name: if a repo still carries a (possibly
+// committed) .gitagent/, untrack it from git and delete it from disk. Safe — it
+// is a regenerable cache, rebuilt under .agentdef/ on the next sync. Returns
+// whether anything was removed.
+function removeLegacyCache(cwd) {
+    const legacy = join(cwd, LEGACY_AGENTDEF_DIR);
+    if (!existsSync(legacy))
+        return false;
+    try {
+        // --ignore-unmatch: fine if it was never committed; disk removal still runs.
+        execFileSync('git', ['rm', '-r', '--cached', '--quiet', '--ignore-unmatch', LEGACY_AGENTDEF_DIR], { cwd, stdio: 'pipe' });
+    }
+    catch {
+        // not tracked (or git unavailable here); the disk removal below is enough.
+    }
+    rmSync(legacy, { recursive: true, force: true });
+    return true;
 }
 // Hooks run `agentdef sync`, but only when agent sources actually changed, so a
 // routine pull doesn't regenerate for nothing. They live in the repo's local
@@ -62,5 +105,7 @@ export function init(dir) {
         chmodSync(path, 0o755);
         installed.push(name);
     }
-    return { hooksDir, installed, unsetHooksPath };
+    const gitignoreAdded = ensureGitignore(cwd);
+    const legacyRemoved = removeLegacyCache(cwd);
+    return { hooksDir, installed, unsetHooksPath, gitignoreAdded, legacyRemoved };
 }

@@ -65,7 +65,7 @@ Same split as the instruction files: `.agents/skills/` is the shared standard fo
 agentdef init         # install git hooks that run sync on pull/merge/checkout/rebase
 agentdef sync         # generate every adapter in .agent-adapters + mirror skills/agents
 agentdef export --format <claude-code|agents|gemini|cursor> [--dir .] [--out FILE]
-agentdef install      # resolve `extends:` parents into .gitagent/parent
+agentdef install      # resolve the full `extends:` chain into .agentdef/parent
 agentdef validate     # check the definition (fail-loud); enforces provider:model
 agentdef watch        # detect upstream format drift
 ```
@@ -81,7 +81,9 @@ A repo can inherit a shared agent definition:
 extends: https://github.com/your-org/base-agent.git
 ```
 
-`agentdef install` clones the parent. On generation: `SOUL.md` from the child replaces the parent's, `RULES.md` is the union (parent first), and skills merge with the child winning on name collisions.
+`extends` resolves recursively: if the parent has its own `extends`, the grandparent resolves too, and so on up the chain. So `texte` → `we-site` → `noord` materializes the whole ancestry in one `sync`, always current. A cycle (a repo that transitively extends itself) fails loudly.
+
+`agentdef install` clones each ancestor one level deeper under `.agentdef/parent` (a regenerable cache; `agentdef init` adds it to `.gitignore`, and migrates a repo off the old `.gitagent/` name by untracking and deleting it, so existing projects just re-run `agentdef init` and commit). On generation, nearer wins: `SOUL.md` is taken from the closest ancestor that defines one (local over parent over grandparent), `RULES.md` is the union (furthest ancestor first, local last), and skills merge with the nearest definition winning on name collision, so a local skill still overrides every inherited one.
 
 ## Format-drift watcher
 

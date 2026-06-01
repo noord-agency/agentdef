@@ -1,6 +1,6 @@
 {
   "name": "@noord-agency/agentdef",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Define an AI agent once, generate the config file every tool expects (CLAUDE.md, AGENTS.md). Implements the AGENTS.md standard. Prior art: open-gitagent (MIT).",
   "type": "module",
   "bin": {
@@ -16,7 +16,8 @@
   },
   "license": "MIT",
   "dependencies": {
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "update-notifier": "^7.3.1"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

@@ -1,31 +1,37 @@
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { loadFileIfExists } from './loader.js';
+import { AGENTDEF_DIR } from './paths.js';
 
-// Resolve SOUL/RULES for an agent, applying parent inheritance when an installed
-// extends-parent is present: SOUL replaces (child wins), RULES are the union with
-// the parent's first. Shared by every adapter so AGENTS.md and CLAUDE.md inherit
-// identically. (Upstream only merged inside the claude-code adapter; this unifies
-// it so the formats can never drift apart on inheritance.)
+// Resolve SOUL/RULES for an agent across the whole extends chain. SOUL replaces:
+// the nearest agent that defines one wins (local over parent over grandparent).
+// RULES are the union, furthest ancestor first so the local agent's rules come
+// last. Shared by every adapter so AGENTS.md and CLAUDE.md inherit identically.
+// (Upstream only merged inside the claude-code adapter; this unifies it so the
+// formats can never drift apart on inheritance.)
 export function resolveIdentity(agentDir: string): {
   soul: string | null;
   rules: string | null;
 } {
-  const dir = resolve(agentDir);
-  const parentDir = join(dir, '.gitagent', 'parent');
-  const hasParent =
-    existsSync(parentDir) && existsSync(join(parentDir, 'agent.yaml'));
+  const souls: string[] = [];
+  const ruleParts: string[] = [];
+  let dir = resolve(agentDir);
 
-  const childSoul = loadFileIfExists(join(dir, 'SOUL.md'));
-  const childRules = loadFileIfExists(join(dir, 'RULES.md'));
-  if (!hasParent) return { soul: childSoul, rules: childRules };
+  // Walk the chain nearest-first; it terminates at the first level with no valid
+  // materialized parent. (Cycles are caught at install time.)
+  for (;;) {
+    const soul = loadFileIfExists(join(dir, 'SOUL.md'));
+    if (soul != null) souls.push(soul);
+    const rules = loadFileIfExists(join(dir, 'RULES.md'));
+    if (rules != null) ruleParts.push(rules);
 
-  const parentSoul = loadFileIfExists(join(parentDir, 'SOUL.md'));
-  const parentRules = loadFileIfExists(join(parentDir, 'RULES.md'));
-  const soul = childSoul ?? parentSoul;
+    const parent = join(dir, AGENTDEF_DIR, 'parent');
+    if (!existsSync(join(parent, 'agent.yaml'))) break;
+    dir = parent;
+  }
+
+  const soul = souls.length > 0 ? souls[0] : null;
   const rules =
-    parentRules && childRules
-      ? `${parentRules}\n\n${childRules}`
-      : (childRules ?? parentRules);
+    ruleParts.length > 0 ? [...ruleParts].reverse().join('\n\n') : null;
   return { soul, rules };
 }
