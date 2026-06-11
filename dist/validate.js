@@ -1,6 +1,6 @@
-import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { loadAgentManifest } from './loader.js';
+import { resolveIdentity } from './merge.js';
 import { loadAllSkills } from './skills.js';
 // Model identifiers must be "provider:model" (e.g. anthropic:claude-opus-4-7).
 // This is the exact rule the repurposed upstream package started enforcing, which
@@ -34,8 +34,18 @@ export function validate(dir) {
     for (const fallback of manifest.model?.fallback ?? []) {
         checkModel(fallback, 'model.fallback');
     }
-    if (!existsSync(join(agentDir, 'SOUL.md'))) {
-        issues.push({ level: 'warning', message: 'SOUL.md not found' });
+    // Chain-aware: a repo inheriting SOUL/RULES via extends is fine; only when the
+    // whole chain resolves empty do adapters emit no identity (e.g. no Cursor
+    // global rule), which would otherwise fail silently.
+    const { soul, rules } = resolveIdentity(agentDir);
+    if (!soul && !rules) {
+        issues.push({
+            level: 'warning',
+            message: 'no SOUL.md or RULES.md found, neither locally nor via the extends chain. Adapters will generate no identity (Cursor: no global rule)',
+        });
+    }
+    else if (!soul) {
+        issues.push({ level: 'warning', message: 'no SOUL.md found, neither locally nor via the extends chain' });
     }
     // parseSkillMd throws on malformed frontmatter or missing name/description,
     // which surfaces here as an error rather than being silently skipped.

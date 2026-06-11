@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import yaml from 'js-yaml';
-import { loadAgentManifest, loadFileIfExists } from '../loader.js';
+import { loadAgentManifest } from '../loader.js';
+import { resolveIdentity } from '../merge.js';
 import { collectSkills, getAllowedTools } from '../skills.js';
 // Cursor is the one tool needing real translation rather than a single file: it
 // reads .cursor/rules/*.mdc, one always-applied global rule (SOUL + RULES) plus
@@ -23,8 +24,7 @@ function buildMdcFile(frontmatter, body) {
     return `---\n${fm}\n---\n\n${body.trim()}\n`;
 }
 function buildGlobalRule(agentDir, description) {
-    const soul = loadFileIfExists(`${agentDir}/SOUL.md`);
-    const rules = loadFileIfExists(`${agentDir}/RULES.md`);
+    const { soul, rules } = resolveIdentity(agentDir);
     if (!soul && !rules)
         return null;
     const body = [];

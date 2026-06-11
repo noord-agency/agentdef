@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import yaml from 'js-yaml';
-import { loadAgentManifest, loadFileIfExists } from '../loader.js';
+import { loadAgentManifest } from '../loader.js';
+import { resolveIdentity } from '../merge.js';
 import { collectSkills, getAllowedTools, type SkillFull } from '../skills.js';
 
 // Cursor is the one tool needing real translation rather than a single file: it
@@ -32,8 +33,7 @@ interface Rule {
 }
 
 function buildGlobalRule(agentDir: string, description: string): Rule | null {
-  const soul = loadFileIfExists(`${agentDir}/SOUL.md`);
-  const rules = loadFileIfExists(`${agentDir}/RULES.md`);
+  const { soul, rules } = resolveIdentity(agentDir);
   if (!soul && !rules) return null;
 
   const body: string[] = [];

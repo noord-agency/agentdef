@@ -104,9 +104,15 @@ export function sync(dir: string, opts: { adapters?: string[] } = {}): SyncResul
 
   install(agentDir, { force: true });
 
-  const errors = validate(agentDir).filter((i) => i.level === 'error');
+  const issues = validate(agentDir);
+  const errors = issues.filter((i) => i.level === 'error');
   if (errors.length > 0) {
     throw new Error(`validation failed:\n  ${errors.map((e) => e.message).join('\n  ')}`);
+  }
+  // Surface validate warnings here too: most users only ever run sync (via the
+  // git hooks), so a warning that exists only in `agentdef validate` is invisible.
+  for (const issue of issues) {
+    if (issue.level === 'warning') warnings.push(`warning: ${issue.message}`);
   }
 
   const written: string[] = [];

@@ -29,35 +29,43 @@ export function install(dir, opts = {}) {
     const root = resolve(dir);
     // Seed with the root's own identity so a chain that points back to it (directly
     // or transitively) is caught before any copy, not after a self-copy crash.
-    resolveExtends(root, Boolean(opts.force), new Set([root]), installed);
+    resolveExtends(root, root, Boolean(opts.force), new Set([root]), installed);
     return { installed };
 }
 // One link in the chain: materialize this agent's parent, then recurse into the
-// parent so its own extends resolves too. `seen` holds the identities already in
-// the chain (the root, plus every source pulled in), so a repo that (transitively)
-// extends itself fails loudly here instead of cloning forever.
-function resolveExtends(agentDir, force, seen, installed) {
+// parent so its own extends resolves too. `sourceDir` is where this agent
+// originally lives (for the root, agentDir itself): a materialized copy under
+// .agentdef/parent must resolve its relative `extends:` against the original
+// location, not the copy, or every second-level local parent goes missing.
+// `seen` holds the identities already in the chain (the root, plus every source
+// pulled in), so a repo that (transitively) extends itself fails loudly here
+// instead of cloning forever.
+function resolveExtends(agentDir, sourceDir, force, seen, installed) {
     const manifest = loadAgentManifest(agentDir);
     if (!manifest.extends)
         return;
     const source = manifest.extends;
-    const localPath = resolve(agentDir, source);
-    const key = existsSync(localPath) ? localPath : source;
+    const localPath = resolve(sourceDir, source);
+    const isLocal = existsSync(localPath);
+    const key = isLocal ? localPath : source;
     if (seen.has(key)) {
         throw new Error(`extends: cycle detected — "${source}" already appears in the chain`);
     }
     seen.add(key);
     const parentDir = join(agentDir, AGENTDEF_DIR, 'parent');
+    // A git-cloned parent has no original location on this machine, so the clone
+    // itself is the best base for resolving whatever it extends.
+    const parentSourceDir = isLocal ? localPath : parentDir;
     if (existsSync(parentDir)) {
         if (!force) {
             // Already materialized by a prior run; resolve its chain so any deeper
             // ancestor still missing gets filled in, then stop.
-            resolveExtends(parentDir, force, seen, installed);
+            resolveExtends(parentDir, parentSourceDir, force, seen, installed);
             return;
         }
         rmSync(parentDir, { recursive: true, force: true });
     }
-    if (existsSync(localPath)) {
+    if (isLocal) {
         mkdirSync(join(parentDir, '..'), { recursive: true });
         cpSync(localPath, parentDir, { recursive: true });
     }
@@ -71,5 +79,5 @@ function resolveExtends(agentDir, force, seen, installed) {
         throw new Error(`extends: parent at ${source} has no agent.yaml, not a valid agent definition`);
     }
     installed.push(installed.length === 0 ? 'parent' : `parent^${installed.length + 1}`);
-    resolveExtends(parentDir, force, seen, installed);
+    resolveExtends(parentDir, parentSourceDir, force, seen, installed);
 }
