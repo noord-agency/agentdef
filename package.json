@@ -4,8 +4,8 @@
   "description": "Define an AI agent once, generate the config file every tool expects (CLAUDE.md, AGENTS.md). Implements the AGENTS.md standard. Prior art: open-gitagent (MIT).",
   "type": "module",
   "bin": {
-    "agentdef": "./dist/cli.js",
-    "ad": "./dist/cli.js"
+    "agentdef": "dist/cli.js",
+    "ad": "dist/cli.js"
   },
   "files": [
     "dist"
