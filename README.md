@@ -31,16 +31,23 @@ agentdef generates whatever each tool reads from that single source. No parallel
 
 ## Supported tools
 
-| Run | Emits | Read by |
-|-----|-------|---------|
-| `--format claude-code` | `CLAUDE.md` | Claude Code |
-| `--format agents` | `AGENTS.md` | Codex, opencode, Kiro, Antigravity, Cursor, Kimi, Grok, Windsurf, Zed, Aider, and the rest of the AGENTS.md standard |
-| `--format gemini` | `GEMINI.md` | Gemini CLI |
-| `--format cursor` | `.cursor/rules/*.mdc` | Cursor (native rules) |
+agentdef generates configs by tool name. Set the name of the tool you actually use, in `.agent-adapters` or via `agentdef adapters set <tool>`:
 
-`agentdef sync` writes each selected tool's instruction file in place: `CLAUDE.md` (claude-code), `AGENTS.md` (codex, opencode, antigravity, kiro, and the AGENTS.md family), `GEMINI.md` (gemini), `.cursor/rules/` (cursor), and `.github/copilot-instructions.md` (GitHub Copilot, which does not use AGENTS.md as its repo instructions).
+| Adapter | Instruction file | Skills dir |
+|---|---|---|
+| `claude-code` (alias `claude`) | `CLAUDE.md` | `.claude/skills/` |
+| `codex` | `AGENTS.md` | `.agents/skills/` |
+| `opencode` | `AGENTS.md` | `.opencode/skills/` |
+| `antigravity` | `AGENTS.md` | `.agents/skills/` |
+| `kiro` | `AGENTS.md` | `.kiro/skills/` |
+| `copilot` | `.github/copilot-instructions.md` | `.github/skills/` |
+| `cursor` | `.cursor/rules/*.mdc` | `.cursor/skills/` |
+| `gemini` | `GEMINI.md` | `.gemini/skills/` |
+| `agents` | `AGENTS.md` | `.agents/skills/` |
 
-**`agents` is the canonical format.** It produces the single `AGENTS.md` file every tool in that row reads, define once, run anywhere. The tool names are accepted as aliases (`--format kimi`, `--format grok`, `--format codex` all resolve to the same `AGENTS.md`), so reaching for the tool you know still works, but prefer `agents`.
+The instruction file is often shared, AGENTS.md is one standard that codex, opencode, antigravity and kiro all read, but the skills dir is tool-specific, so `opencode` and `kiro` place skills where those tools look rather than in `.agents/skills/`. That is why you set the real tool name, not a generic one. `agents` is the vendor-neutral baseline (AGENTS.md + `.agents/skills/`); `codex` and `antigravity` produce exactly that. GitHub Copilot is the one tool that does not read AGENTS.md for its repo instructions, so it gets its native `.github/copilot-instructions.md`.
+
+The same names work with `agentdef export --format <name>` (plus extra AGENTS.md aliases like `kimi`, `grok`, `windsurf`, `zed`, `aider`).
 
 ## Why only two formats
 
@@ -50,16 +57,9 @@ The AI-coding ecosystem converged on essentially two instruction-file formats: *
 
 Skills are the other half of the standard. A skill is a folder with a `SKILL.md` (YAML frontmatter + instructions); the format is shared across tools, so skills are copied, not translated.
 
-You author skills once in `skills/`. Tools never read that folder directly, `agentdef sync` mirrors it into each tool's skills dir:
+You author skills once in `skills/`. Tools never read that folder directly, `agentdef sync` mirrors it into each tool's skills dir (the right-hand column of the table above: `.claude/skills/`, `.agents/skills/`, `.opencode/skills/`, and so on).
 
-| Tool | Skills dir |
-|---|---|
-| Claude Code | `.claude/skills/` |
-| Codex, Kimi, Grok, Antigravity | `.agents/skills/` (the cross-tool standard) |
-| Cursor | `.cursor/skills/` |
-| Gemini CLI | `.gemini/skills/` |
-
-Same split as the instruction files: `.agents/skills/` is the shared standard for the AGENTS.md family, the others are tool-specific. There is no single root skills folder that every tool reads; `skills/` is the source, the `.[tool]/skills/` dirs are generated. In the instruction file, `CLAUDE.md` indexes skills with a pointer (Claude Code loads each on demand) while `AGENTS.md` and `GEMINI.md` inline them in full.
+`.agents/skills/` is the shared standard for the AGENTS.md family; the others are tool-specific. There is no single root skills folder that every tool reads; `skills/` is the source, the `.[tool]/skills/` dirs are generated. In the instruction file, `CLAUDE.md` indexes skills with a pointer (Claude Code loads each on demand) while `AGENTS.md` and `GEMINI.md` inline them in full.
 
 ## Commands
 
