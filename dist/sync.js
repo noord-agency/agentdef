@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
+import { homedir } from 'node:os';
 import { install } from './install.js';
 import { validate } from './validate.js';
 import { exportToClaudeCode } from './adapters/claude-code.js';
@@ -29,17 +30,70 @@ const AGENT_DIR = {
     antigravity: '.agents/agents',
     copilot: '.github/agents',
 };
-function readAdapters(agentDir, override) {
-    if (override && override.length)
-        return override;
-    const file = join(agentDir, '.agent-adapters');
-    if (!existsSync(file)) {
-        throw new Error('.agent-adapters not found. List one tool per line, or pass --adapters a,b,c');
-    }
-    return readFileSync(file, 'utf-8')
+// The tools agentdef knows how to generate for. Single-sourced from SKILL_DIR
+// so `adapters set` can warn on a typo instead of silently generating nothing.
+export const KNOWN_ADAPTERS = new Set(Object.keys(SKILL_DIR));
+// One tool per line; blank lines and `# ...` comments ignored. Shared by the
+// per-repo file and the machine-level default so they parse identically.
+function parseAdapterList(text) {
+    return text
         .split('\n')
         .map((l) => l.trim())
         .filter((l) => l && !l.startsWith('#'));
+}
+// Machine-level default adapter list: declare your tools ONCE per machine
+// instead of in every repo. `.agent-adapters` answers "which AI tool does this
+// developer use", a personal, per-machine fact, not repo content, so it does
+// not flow through `extends`. The per-repo `.agent-adapters` always overrides
+// this. Location: $AGENTDEF_ADAPTERS_FILE, else $XDG_CONFIG_HOME/agentdef/adapters,
+// else ~/.config/agentdef/adapters.
+export function machineAdaptersPath() {
+    if (process.env.AGENTDEF_ADAPTERS_FILE)
+        return process.env.AGENTDEF_ADAPTERS_FILE;
+    const configHome = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+    return join(configHome, 'agentdef', 'adapters');
+}
+// Resolve the adapter list without throwing, reporting where it came from.
+// Order: --adapters flag, then the per-repo file (if it lists a tool), then the
+// machine default. `agentDir` must already be resolved to an absolute path.
+export function resolveAdapters(agentDir, override) {
+    if (override && override.length)
+        return { adapters: override, source: 'flag' };
+    const local = join(agentDir, '.agent-adapters');
+    if (existsSync(local)) {
+        const list = parseAdapterList(readFileSync(local, 'utf-8'));
+        if (list.length)
+            return { adapters: list, source: 'repo', path: local };
+    }
+    const machine = machineAdaptersPath();
+    if (existsSync(machine)) {
+        const list = parseAdapterList(readFileSync(machine, 'utf-8'));
+        if (list.length)
+            return { adapters: list, source: 'machine', path: machine };
+    }
+    return { adapters: [], source: 'none' };
+}
+// Write an adapter list, either the per-repo file or the machine default.
+// Returns the path written and any tool names agentdef does not recognise.
+export function writeAdapters(tools, opts) {
+    const unknown = tools.filter((t) => !KNOWN_ADAPTERS.has(t));
+    const path = opts.local ? join(resolve(opts.dir), '.agent-adapters') : machineAdaptersPath();
+    const header = opts.local
+        ? '# Per-repo tools for agentdef sync (gitignored, this checkout only). One per line.\n'
+        : '# Machine-level default tools for agentdef sync. One per line. A per-repo\n# .agent-adapters overrides this.\n';
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${header}${tools.join('\n')}\n`);
+    return { path, unknown };
+}
+function readAdapters(agentDir, override) {
+    const r = resolveAdapters(agentDir, override);
+    if (r.adapters.length)
+        return r.adapters;
+    const hasLocal = existsSync(join(agentDir, '.agent-adapters'));
+    const where = `Set a machine default with 'agentdef adapters set <tool>...' (${machineAdaptersPath()}), add a per-repo .agent-adapters, or pass --adapters a,b,c`;
+    throw new Error(hasLocal
+        ? `.agent-adapters has no active tools. ${where}`
+        : `.agent-adapters not found. ${where}`);
 }
 function writeOut(agentDir, rel, content) {
     const path = join(agentDir, rel);

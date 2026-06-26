@@ -11,8 +11,9 @@ import { install } from './install.js';
 import { validate } from './validate.js';
 import { watch } from './watch.js';
 import { FORMAT_SOURCES } from './watch-sources.js';
-import { sync } from './sync.js';
+import { sync, resolveAdapters, writeAdapters, machineAdaptersPath, KNOWN_ADAPTERS } from './sync.js';
 import { init } from './init.js';
+import { resolve } from 'node:path';
 
 // Status/logs go to stderr; only generated content goes to stdout. This is the
 // deliberate fix for the upstream bug that leaked log lines into CLAUDE.md.
@@ -129,6 +130,50 @@ async function main(): Promise<void> {
       break;
     }
 
+    case 'adapters': {
+      // Subcommand is the first positional after `adapters`; a flag like --dir
+      // is not a subcommand, so bare `agentdef adapters --dir X` still shows.
+      const sub = process.argv[3] && !process.argv[3].startsWith('-') ? process.argv[3] : undefined;
+      const knownList = [...KNOWN_ADAPTERS].sort().join(', ');
+      if (sub === 'set') {
+        // Positional tools after `set`, ignoring flags and the --dir/-d value.
+        const raw = process.argv.slice(4);
+        const tools: string[] = [];
+        for (let i = 0; i < raw.length; i++) {
+          const a = raw[i];
+          if (a === '--dir' || a === '-d') { i++; continue; }
+          if (a.startsWith('-')) continue;
+          tools.push(a);
+        }
+        if (tools.length === 0) {
+          console.error('usage: agentdef adapters set [--local] <tool> [tool...]');
+          process.exit(1);
+        }
+        const { path, unknown } = writeAdapters(tools, { local: has('--local'), dir });
+        console.error(`wrote ${tools.join(', ')} to ${path}`);
+        if (unknown.length) {
+          console.error(`warning: unknown adapter(s): ${unknown.join(', ')} (agentdef generates nothing for these). known: ${knownList}`);
+        }
+        console.error(has('--local')
+          ? 'this repo uses these on the next sync'
+          : 'repos without a per-repo .agent-adapters use these on the next sync');
+      } else if (!sub || sub === 'show') {
+        const r = resolveAdapters(resolve(dir));
+        if (r.source === 'none') {
+          // Exit non-zero so scripts (e.g. bootstrap) can gate on "configured?".
+          console.error(`no adapters set. Run 'agentdef adapters set <tool> [tool...]' (writes ${machineAdaptersPath()}). known: ${knownList}`);
+          process.exit(1);
+        }
+        const label = r.source === 'repo' ? 'this repo' : r.source === 'machine' ? 'machine default' : r.source;
+        console.error(`adapters: ${r.adapters.join(', ')}`);
+        console.error(`source:   ${r.path} (${label})`);
+      } else {
+        console.error('usage: agentdef adapters [show | set [--local] <tool>...]');
+        process.exit(1);
+      }
+      break;
+    }
+
     case 'init': {
       const res = init(dir);
       console.error(`installed hooks in ${res.hooksDir}: ${res.installed.join(', ')}`);
@@ -140,7 +185,7 @@ async function main(): Promise<void> {
     }
 
     default:
-      console.error('usage: agentdef <init|sync|export|install|validate|watch> [--format <claude-code|agents|gemini|cursor>] [--adapters a,b,c] [--dir .] [--out FILE] [--force] [--update]');
+      console.error('usage: agentdef <init|sync|adapters|export|install|validate|watch> [--format <claude-code|agents|gemini|cursor>] [--adapters a,b,c] [--dir .] [--out FILE] [--force] [--update]');
       process.exit(1);
   }
 }

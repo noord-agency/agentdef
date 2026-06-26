@@ -64,6 +64,8 @@ Same split as the instruction files: `.agents/skills/` is the shared standard fo
 ```bash
 agentdef init         # install git hooks that run sync on pull/merge/checkout/rebase
 agentdef sync         # generate every adapter in .agent-adapters + mirror skills/agents
+agentdef adapters     # show which tools sync will generate for, and from where
+agentdef adapters set [--local] <tool>...   # set the machine default (or, with --local, this repo)
 agentdef export --format <claude-code|agents|gemini|cursor> [--dir .] [--out FILE]
 agentdef install      # resolve the full `extends:` chain into .agentdef/parent
 agentdef validate     # check the definition (fail-loud); enforces provider:model
@@ -71,6 +73,24 @@ agentdef watch        # detect upstream format drift
 ```
 
 Status goes to stderr and only generated content to stdout, so `agentdef export -f claude-code > CLAUDE.md` is clean.
+
+## Choosing your tools (`.agent-adapters`)
+
+`.agent-adapters` lists which tools `sync` generates for, one per line (blank lines and `# ...` comments ignored). It answers "which AI tool does *this developer* use", a personal, per-machine fact, not part of the agent definition, so it is gitignored and never flows through `extends`.
+
+To avoid re-declaring it in every repo, `sync` resolves the adapter list in this order:
+
+1. `--adapters a,b,c` on the command line, else
+2. the per-repo `.agent-adapters` file (if it lists at least one tool), else
+3. a **machine-level default**: `$AGENTDEF_ADAPTERS_FILE`, else `$XDG_CONFIG_HOME/agentdef/adapters`, else `~/.config/agentdef/adapters`.
+
+So set your tools once per machine:
+
+```bash
+agentdef adapters set claude-code cursor   # writes ~/.config/agentdef/adapters
+```
+
+and every repo works with no per-repo setup. For a repo that should differ, `agentdef adapters set --local gemini` writes that repo's `.agent-adapters`, which wins. `agentdef adapters` shows the resolved list and which source it came from. If none of the three yields a tool, `sync` fails loudly telling you where to set one.
 
 ## Inheritance
 
