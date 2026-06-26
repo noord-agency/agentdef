@@ -29,6 +29,8 @@ skills/         one folder per skill, each with a SKILL.md
 
 agentdef generates whatever each tool reads from that single source. No parallel copies to maintain, no drift between tools.
 
+The generated files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursor/rules/`) are build artifacts: gitignore them, never hand-edit them (the next sync overwrites them), and edit the sources above instead. They're outputs, not sources, AGENTS.md included.
+
 ## Supported tools
 
 agentdef generates configs by tool name. Set the name of the tool you actually use, in `.agent-adapters` or via `agentdef adapters set <tool>`:
