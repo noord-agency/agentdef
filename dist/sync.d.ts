@@ -14,6 +14,12 @@ export declare function writeAdapters(tools: string[], opts: {
     path: string;
     unknown: string[];
 };
+export interface AdapterInfo {
+    name: string;
+    instruction: string;
+    skills: string;
+}
+export declare function knownAdapters(): AdapterInfo[];
 export interface SyncResult {
     adapters: string[];
     written: string[];

@@ -155,6 +155,44 @@ function generateInstruction(adapter: string, agentDir: string): string[] {
   }
 }
 
+// Display label of the instruction file each adapter emits. Mirrors
+// generateInstruction above; keep the two in sync.
+const INSTRUCTION_FILE: Record<string, string> = {
+  'claude-code': 'CLAUDE.md',
+  claude: 'CLAUDE.md',
+  agents: 'AGENTS.md',
+  codex: 'AGENTS.md',
+  opencode: 'AGENTS.md',
+  antigravity: 'AGENTS.md',
+  kiro: 'AGENTS.md',
+  copilot: '.github/copilot-instructions.md',
+  cursor: '.cursor/rules/',
+  gemini: 'GEMINI.md',
+};
+
+// Fixed display order for `agentdef adapters list`: claude family, the AGENTS.md
+// family, then the tools with their own file.
+const ADAPTER_ORDER = [
+  'claude-code', 'claude',
+  'codex', 'agents', 'opencode', 'antigravity', 'kiro',
+  'copilot', 'cursor', 'gemini',
+];
+
+export interface AdapterInfo {
+  name: string;
+  instruction: string;
+  skills: string;
+}
+
+// The known adapters with what each generates, for `agentdef adapters list`.
+export function knownAdapters(): AdapterInfo[] {
+  return ADAPTER_ORDER.map((name) => ({
+    name,
+    instruction: INSTRUCTION_FILE[name] ?? '(skills only)',
+    skills: SKILL_DIR[name] ? `${SKILL_DIR[name]}/` : '(none)',
+  }));
+}
+
 export interface SyncResult {
   adapters: string[];
   written: string[];

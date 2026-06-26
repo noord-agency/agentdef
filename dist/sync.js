@@ -138,6 +138,35 @@ function generateInstruction(adapter, agentDir) {
             return [];
     }
 }
+// Display label of the instruction file each adapter emits. Mirrors
+// generateInstruction above; keep the two in sync.
+const INSTRUCTION_FILE = {
+    'claude-code': 'CLAUDE.md',
+    claude: 'CLAUDE.md',
+    agents: 'AGENTS.md',
+    codex: 'AGENTS.md',
+    opencode: 'AGENTS.md',
+    antigravity: 'AGENTS.md',
+    kiro: 'AGENTS.md',
+    copilot: '.github/copilot-instructions.md',
+    cursor: '.cursor/rules/',
+    gemini: 'GEMINI.md',
+};
+// Fixed display order for `agentdef adapters list`: claude family, the AGENTS.md
+// family, then the tools with their own file.
+const ADAPTER_ORDER = [
+    'claude-code', 'claude',
+    'codex', 'agents', 'opencode', 'antigravity', 'kiro',
+    'copilot', 'cursor', 'gemini',
+];
+// The known adapters with what each generates, for `agentdef adapters list`.
+export function knownAdapters() {
+    return ADAPTER_ORDER.map((name) => ({
+        name,
+        instruction: INSTRUCTION_FILE[name] ?? '(skills only)',
+        skills: SKILL_DIR[name] ? `${SKILL_DIR[name]}/` : '(none)',
+    }));
+}
 // The orchestrator: read the adapter list, resolve extends, validate, then for
 // each adapter generate its instruction file and mirror skills/agents into its
 // tool dir. No sandbox needed: nothing here writes into committed source.

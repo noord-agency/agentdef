@@ -67,6 +67,7 @@ You author skills once in `skills/`. Tools never read that folder directly, `age
 agentdef init         # install git hooks that run sync on pull/merge/checkout/rebase
 agentdef sync         # generate every adapter in .agent-adapters + mirror skills/agents
 agentdef adapters     # show which tools sync will generate for, and from where
+agentdef adapters list                      # list every known adapter + what it emits
 agentdef adapters set [--local] <tool>...   # set the machine default (or, with --local, this repo)
 agentdef export --format <claude-code|agents|gemini|cursor> [--dir .] [--out FILE]
 agentdef install      # resolve the full `extends:` chain into .agentdef/parent

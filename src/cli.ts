@@ -11,7 +11,7 @@ import { install } from './install.js';
 import { validate } from './validate.js';
 import { watch } from './watch.js';
 import { FORMAT_SOURCES } from './watch-sources.js';
-import { sync, resolveAdapters, writeAdapters, machineAdaptersPath, KNOWN_ADAPTERS } from './sync.js';
+import { sync, resolveAdapters, writeAdapters, machineAdaptersPath, KNOWN_ADAPTERS, knownAdapters } from './sync.js';
 import { init } from './init.js';
 import { resolve } from 'node:path';
 
@@ -159,6 +159,11 @@ async function main(): Promise<void> {
         console.error(has('--local')
           ? 'this repo uses these on the next sync'
           : 'repos without a per-repo .agent-adapters use these on the next sync');
+      } else if (sub === 'list') {
+        console.error('known adapters (set with: agentdef adapters set <name>...):');
+        for (const a of knownAdapters()) {
+          console.error(`  ${a.name.padEnd(13)} ${a.instruction.padEnd(34)} ${a.skills}`);
+        }
       } else if (!sub || sub === 'show') {
         const r = resolveAdapters(resolve(dir));
         if (r.source === 'none') {
@@ -170,7 +175,7 @@ async function main(): Promise<void> {
         console.error(`adapters: ${r.adapters.join(', ')}`);
         console.error(`source:   ${r.path} (${label})`);
       } else {
-        console.error('usage: agentdef adapters [show | set [--local] <tool>...]');
+        console.error('usage: agentdef adapters [list | show | set [--local] <tool>...]');
         process.exit(1);
       }
       break;
