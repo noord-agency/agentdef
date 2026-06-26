@@ -34,9 +34,11 @@ agentdef generates whatever each tool reads from that single source. No parallel
 | Run | Emits | Read by |
 |-----|-------|---------|
 | `--format claude-code` | `CLAUDE.md` | Claude Code |
-| `--format agents` | `AGENTS.md` | Codex, Cursor, Kimi, Grok, Antigravity, Windsurf, Zed, Aider, and the rest of the AGENTS.md standard |
+| `--format agents` | `AGENTS.md` | Codex, opencode, Kiro, Antigravity, Cursor, Kimi, Grok, Windsurf, Zed, Aider, and the rest of the AGENTS.md standard |
 | `--format gemini` | `GEMINI.md` | Gemini CLI |
 | `--format cursor` | `.cursor/rules/*.mdc` | Cursor (native rules) |
+
+`agentdef sync` writes each selected tool's instruction file in place: `CLAUDE.md` (claude-code), `AGENTS.md` (codex, opencode, antigravity, kiro, and the AGENTS.md family), `GEMINI.md` (gemini), `.cursor/rules/` (cursor), and `.github/copilot-instructions.md` (GitHub Copilot, which does not use AGENTS.md as its repo instructions).
 
 **`agents` is the canonical format.** It produces the single `AGENTS.md` file every tool in that row reads, define once, run anywhere. The tool names are accepted as aliases (`--format kimi`, `--format grok`, `--format codex` all resolve to the same `AGENTS.md`), so reaching for the tool you know still works, but prefer `agents`.
 

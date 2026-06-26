@@ -62,6 +62,8 @@ async function main() {
                 case 'opencode':
                 case 'zed':
                 case 'aider':
+                case 'kiro':
+                case 'copilot':
                     result = exportToAgentsMd(dir);
                     break;
                 case 'gemini':

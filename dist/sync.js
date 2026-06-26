@@ -108,10 +108,20 @@ function generateInstruction(adapter, agentDir) {
         case 'claude':
             writeOut(agentDir, 'CLAUDE.md', exportToClaudeCode(agentDir));
             return ['CLAUDE.md'];
+        // AGENTS.md is the shared standard. codex, opencode, antigravity and kiro
+        // all read it (kiro additionally supports .kiro/steering, AGENTS.md is fine).
         case 'agents':
         case 'codex':
+        case 'opencode':
+        case 'antigravity':
+        case 'kiro':
             writeOut(agentDir, 'AGENTS.md', exportToAgentsMd(agentDir));
             return ['AGENTS.md'];
+        // GitHub Copilot does NOT use AGENTS.md as its repo instructions; its native
+        // file is .github/copilot-instructions.md (same content).
+        case 'copilot':
+            writeOut(agentDir, '.github/copilot-instructions.md', exportToAgentsMd(agentDir));
+            return ['.github/copilot-instructions.md'];
         case 'gemini':
             writeOut(agentDir, 'GEMINI.md', exportToGemini(agentDir));
             return ['GEMINI.md'];
@@ -123,8 +133,8 @@ function generateInstruction(adapter, agentDir) {
             return [`.cursor/rules/ (${files.length})`];
         }
         default:
-            // Adapter with no instruction file of its own (skills-mirror only), or one
-            // we do not generate a file for. Skill mirroring still applies below.
+            // Unknown adapter name (not one of the known tools). Skill mirroring still
+            // applies below if it has a SKILL_DIR entry; no instruction file is written.
             return [];
     }
 }
