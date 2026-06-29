@@ -1,7 +1,7 @@
 import { join, resolve } from 'node:path';
 import { loadAgentManifest, loadFileIfExists } from './loader.js';
 import { resolveIdentity } from './merge.js';
-import { collectSkills, getAllowedTools } from './skills.js';
+import { collectSkillMetadata } from './skills.js';
 export function buildInstructionDoc(dir, opts = {}) {
     const agentDir = resolve(dir);
     const manifest = loadAgentManifest(agentDir);
@@ -23,17 +23,18 @@ export function buildInstructionDoc(dir, opts = {}) {
         parts.push(duty);
         parts.push('');
     }
-    const skills = collectSkills(agentDir);
+    const skills = collectSkillMetadata(agentDir);
     if (skills.length > 0) {
         parts.push('## Skills');
         parts.push('');
         for (const skill of skills) {
-            const tools = getAllowedTools(skill.frontmatter);
-            const toolsNote = tools.length > 0 ? `\nAllowed tools: ${tools.join(', ')}` : '';
-            parts.push(`### ${skill.frontmatter.name}`);
-            parts.push(`${skill.frontmatter.description}${toolsNote}`);
-            parts.push('');
-            parts.push(skill.instructions);
+            const skillDirName = skill.directory.split('/').pop();
+            parts.push(`### ${skill.name}`);
+            parts.push(skill.description);
+            if (skill.allowedTools && skill.allowedTools.length > 0) {
+                parts.push(`Allowed tools: ${skill.allowedTools.join(', ')}`);
+            }
+            parts.push(`Full instructions: \`skills/${skillDirName}/SKILL.md\``);
             parts.push('');
         }
     }

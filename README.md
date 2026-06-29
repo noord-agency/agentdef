@@ -61,7 +61,7 @@ Skills are the other half of the standard. A skill is a folder with a `SKILL.md`
 
 You author skills once in `skills/`. Tools never read that folder directly, `agentdef sync` mirrors it into each tool's skills dir (the right-hand column of the table above: `.claude/skills/`, `.agents/skills/`, `.opencode/skills/`, and so on).
 
-`.agents/skills/` is the shared standard for the AGENTS.md family; the others are tool-specific. There is no single root skills folder that every tool reads; `skills/` is the source, the `.[tool]/skills/` dirs are generated. In the instruction file, `CLAUDE.md` indexes skills with a pointer (Claude Code loads each on demand) while `AGENTS.md` and `GEMINI.md` inline them in full.
+`.agents/skills/` is the shared standard for the AGENTS.md family; the others are tool-specific. There is no single root skills folder that every tool reads; `skills/` is the source, the `.[tool]/skills/` dirs are generated. Every instruction file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`) indexes skills with metadata + a pointer to each `SKILL.md`, rather than inlining them. The tools load each skill on demand from their own skills dir (the Agent Skills standard), so inlining would only duplicate the content and bloat the file.
 
 ## Commands
 

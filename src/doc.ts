@@ -1,12 +1,15 @@
 import { join, resolve } from 'node:path';
 import { loadAgentManifest, loadFileIfExists } from './loader.js';
 import { resolveIdentity } from './merge.js';
-import { collectSkills, getAllowedTools } from './skills.js';
+import { collectSkillMetadata } from './skills.js';
 
 // Shared builder for single-file instruction docs (AGENTS.md, GEMINI.md): one
-// flat document with identity + SOUL + RULES + every skill inlined. Optional
-// delegation (sub-agents) and memory sections are appended for tools that want
-// them. Keeps AGENTS.md and GEMINI.md from drifting apart on the shared core.
+// flat document with identity + SOUL + RULES + a skills INDEX (metadata + a
+// pointer to each SKILL.md). Skills are NOT inlined: AGENTS.md-family tools and
+// Gemini auto-load skills from their own skills dir (the Agent Skills standard),
+// so inlining would only duplicate them and bloat the file. Same approach as
+// CLAUDE.md. Optional delegation (sub-agents) and memory sections are appended
+// for tools that want them. Keeps AGENTS.md and GEMINI.md from drifting apart.
 export interface DocOptions {
   delegation?: boolean;
   memory?: boolean;
@@ -36,17 +39,18 @@ export function buildInstructionDoc(dir: string, opts: DocOptions = {}): string 
     parts.push('');
   }
 
-  const skills = collectSkills(agentDir);
+  const skills = collectSkillMetadata(agentDir);
   if (skills.length > 0) {
     parts.push('## Skills');
     parts.push('');
     for (const skill of skills) {
-      const tools = getAllowedTools(skill.frontmatter);
-      const toolsNote = tools.length > 0 ? `\nAllowed tools: ${tools.join(', ')}` : '';
-      parts.push(`### ${skill.frontmatter.name}`);
-      parts.push(`${skill.frontmatter.description}${toolsNote}`);
-      parts.push('');
-      parts.push(skill.instructions);
+      const skillDirName = skill.directory.split('/').pop();
+      parts.push(`### ${skill.name}`);
+      parts.push(skill.description);
+      if (skill.allowedTools && skill.allowedTools.length > 0) {
+        parts.push(`Allowed tools: ${skill.allowedTools.join(', ')}`);
+      }
+      parts.push(`Full instructions: \`skills/${skillDirName}/SKILL.md\``);
       parts.push('');
     }
   }
