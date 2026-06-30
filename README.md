@@ -12,8 +12,8 @@ agentdef turns one agent definition into the instruction file each AI coding too
 ```bash
 npm install -g @noord-agency/agentdef
 
-agentdef init     # install git hooks: regenerate on pull/merge/checkout
-agentdef sync     # generate configs for the tools in .agent-adapters
+agentdef adapters set claude-code cursor   # once per machine: choose your tools
+agentdef init                              # once per repo: install hooks + first sync
 ```
 
 ## The idea
@@ -66,7 +66,7 @@ You author skills once in `skills/`. Tools never read that folder directly, `age
 ## Commands
 
 ```bash
-agentdef init         # install git hooks that run sync on pull/merge/checkout/rebase
+agentdef init         # install git hooks + run the first sync (one-time per repo; --no-sync to skip)
 agentdef sync         # generate every adapter in .agent-adapters + mirror skills/agents
 agentdef adapters     # show which tools sync will generate for, and from where
 agentdef adapters list                      # list every known adapter + what it emits

@@ -187,6 +187,19 @@ async function main(): Promise<void> {
       if (res.unsetHooksPath) console.error('unset core.hooksPath so the installed hooks run');
       if (res.gitignoreAdded) console.error('added .agentdef/ to .gitignore (regenerable cache, never commit it)');
       if (res.legacyRemoved) console.error('migrated: removed legacy .gitagent/ (untracked + deleted); commit the change');
+      // First sync, so `agentdef init` is the entire one-time setup. --no-sync
+      // opts out; a missing adapter list is a hint, not a failure (the hooks are
+      // already installed, so sync can run later once adapters are chosen).
+      if (!has('--no-sync')) {
+        if (resolveAdapters(resolve(dir)).source === 'none') {
+          console.error("no adapters configured yet; run 'agentdef adapters set <tool>...' then 'agentdef sync'");
+        } else {
+          const sres = sync(dir);
+          console.error(`synced for: ${sres.adapters.join(', ')}`);
+          for (const w of sres.written) console.error(`  ${w}`);
+          for (const warning of sres.warnings) console.error(warning);
+        }
+      }
       console.error('done. agentdef sync now runs automatically after pull/merge/checkout/rebase.');
       break;
     }
