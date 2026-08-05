@@ -29,15 +29,19 @@ after(() => {
 
 // Runs the real CLI as a subprocess: the defect lives in argv handling and
 // process exit codes, neither of which is observable from an in-process import.
-// It runs from the repo (so `--import tsx` resolves) and targets the fixture via
-// --dir, which is how a globally installed agentdef is actually invoked anyway.
+// It runs from the repo and targets the fixture via --dir, which is how a
+// globally installed agentdef is actually invoked anyway. `cwd` is for the tests
+// that turn on where a *missing* --dir falls back to, so tsx is resolved here,
+// against this file, rather than left to resolve against a fixture that has no
+// node_modules.
 const REPO = resolve(import.meta.dirname, '..');
-function run(args: string[], dir?: string): { code: number; stdout: string; stderr: string } {
+const TSX = import.meta.resolve('tsx');
+function run(args: string[], dir?: string, cwd = REPO): { code: number; stdout: string; stderr: string } {
   const r = spawnSync(
     process.execPath,
-    ['--import', 'tsx', CLI, ...args, ...(dir ? ['--dir', dir] : [])],
+    ['--import', TSX, CLI, ...args, ...(dir ? ['--dir', dir] : [])],
     {
-      cwd: REPO,
+      cwd,
       encoding: 'utf-8',
       // A stale update-notifier cache must not add lines to stderr mid-assertion.
       env: { ...process.env, NO_UPDATE_NOTIFIER: '1' },
@@ -106,6 +110,107 @@ describe('--help never reaches a command', () => {
     assert.match(r.stdout, /usage: agentdef sync/);
     assert.ok(!existsSync(join(root, 'CLAUDE.md')));
   });
+});
+
+// The --help interception matched two exact strings, so `-help` missed it and
+// ran the command instead. `-help` is only the visible half: an unknown flag was
+// discarded everywhere, which meant a typo silently changed what a command did
+// rather than stopping it. These tests pin the flag, the directory it points at,
+// and the exit code, because the fix has to hold for flags nobody has typo'd yet.
+describe('an unknown flag stops the command', () => {
+  test('-help is refused and named, not run', () => {
+    const root = fixture(AGENT);
+    const r = run(['validate', '-help'], root);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /unknown flag: -help \(did you mean --help\?\)/);
+    assert.doesNotMatch(r.stderr, /validation (passed|failed)/, '-help must not run validate');
+    assert.equal(r.stdout, '', 'a rejection is not a help request: nothing on stdout');
+  });
+
+  test('sync -help writes nothing', () => {
+    const root = fixture(AGENT);
+    const before = readdirSync(root).sort();
+    const r = run(['sync', '-help'], root);
+    assert.equal(r.code, 1);
+    assert.deepEqual(readdirSync(root).sort(), before);
+    assert.ok(!existsSync(join(root, 'CLAUDE.md')));
+  });
+
+  // The reason this is not just a --help fix. `-dir` was dropped, `dir` fell back
+  // to '.', and sync regenerated the directory it was run from while reporting
+  // success — the user's target repo was never touched and nothing said so.
+  test('sync -dir does not silently fall back to the current directory', () => {
+    const from = fixture(AGENT);
+    const target = fixture(AGENT);
+
+    const r = run(['sync', '-dir', target], undefined, from);
+
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /unknown flag: -dir \(did you mean --dir\?\)/);
+    assert.ok(!existsSync(join(from, 'CLAUDE.md')), 'must not write the directory it was run from');
+    assert.ok(!existsSync(join(target, 'CLAUDE.md')), 'must not write the target either');
+  });
+
+  test('a misspelled long flag is refused rather than ignored', () => {
+    const root = fixture(AGENT);
+    const r = run(['sync', '--forse'], root);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /unknown flag: --forse/);
+    assert.doesNotMatch(r.stderr, /did you mean/, 'no single-dash form to suggest here');
+    assert.match(r.stderr, /usage: agentdef sync/, 'the rejection shows that command, not the whole CLI');
+    assert.ok(!existsSync(join(root, 'CLAUDE.md')));
+  });
+
+  test('every unknown flag is reported in one run', () => {
+    const root = fixture(AGENT);
+    const r = run(['sync', '--forse', '-adapters', 'claude-code'], root);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /unknown flag: --forse/);
+    assert.match(r.stderr, /unknown flag: -adapters \(did you mean --adapters\?\)/);
+  });
+
+  // The other half of the contract: rejecting must not cost the flags that work.
+  test('declared flags, their values and positionals still pass', () => {
+    const root = fixture(AGENT);
+    assert.equal(run(['sync', '--force'], root).code, 0);
+    assert.equal(run(['export', '--format', 'claude-code'], root).code, 0);
+    assert.equal(run(['adapters', 'set', '--local', 'claude-code', 'gemini'], root).code, 0);
+    assert.equal(run(['validate'], root).code, 0);
+  });
+
+  // `--help` is answered before the flag check, so an unparsable command line can
+  // still ask what its flags are — the one thing a user in this state needs.
+  test('--help still wins over an unknown flag on the same line', () => {
+    const root = fixture(AGENT);
+    const r = run(['sync', '--forse', '--help'], root);
+    assert.equal(r.code, 0);
+    assert.match(r.stdout, /usage: agentdef sync/);
+  });
+
+  // The parser reads the `flags` table, the user reads the usage text; nothing
+  // links the two, so a flag that is documented but never declared would now be
+  // rejected on sight. This walks every flag each command advertises and checks
+  // the parser takes it. The probe goes *first* so a value-taking flag at the end
+  // has nothing to swallow, and the rejection lands before dispatch — so this
+  // asks eight commands about their flags without running any of them.
+  for (const cmd of ['init', 'sync', 'adapters', 'export', 'install', 'validate', 'watch', 'knowledge']) {
+    test(`${cmd} accepts every flag its help advertises`, () => {
+      const root = fixture(AGENT);
+      const documented = new Set(run([cmd, '--help'], root).stdout.match(/--[a-z][a-z-]*/g));
+      documented.delete('--help');
+      for (const flag of documented) {
+        const r = run([cmd, '--probe-unknown', flag], root);
+        assert.equal(r.code, 1);
+        assert.match(r.stderr, /unknown flag: --probe-unknown/);
+        assert.doesNotMatch(
+          r.stderr,
+          new RegExp(`unknown flag: ${flag}\\b`),
+          `${cmd} --help advertises ${flag} but the parser rejects it`,
+        );
+      }
+      assert.ok(documented.size > 0, `${cmd} --help should still document --dir at least`);
+    });
+  }
 });
 
 describe('help output and exit codes', () => {

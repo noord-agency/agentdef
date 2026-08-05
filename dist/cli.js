@@ -24,11 +24,19 @@ function getOpt(long, short) {
     return i >= 0 ? process.argv[i + 1] : undefined;
 }
 const has = (flag) => process.argv.includes(flag);
+// Taken by every command, so they are declared once rather than in all eight.
+const GLOBAL_FLAGS = {
+    '--dir': 'value',
+    '-d': 'value',
+    '--help': 'bare',
+    '-h': 'bare',
+};
 const COMMANDS = {
     init: {
         usage: 'agentdef init [--no-sync] [--dir .]',
         summary: 'install the git hooks and run the first sync (the whole one-time setup)',
         detail: ['--no-sync    install the hooks only, skip the initial sync'],
+        flags: { '--no-sync': 'bare' },
     },
     sync: {
         usage: 'agentdef sync [--adapters a,b,c] [--force] [--dir .]',
@@ -37,6 +45,7 @@ const COMMANDS = {
             '--adapters   comma-separated tools for this run, overriding .agent-adapters',
             '--force      regenerate even when no source changed',
         ],
+        flags: { '--adapters': 'value', '--force': 'bare' },
     },
     adapters: {
         usage: 'agentdef adapters [list | show | set [--local] <tool>...] [--dir .]',
@@ -46,6 +55,7 @@ const COMMANDS = {
             'show         the adapters in effect here and where they come from (default)',
             'set          write the adapter list; --local writes it into this repo',
         ],
+        flags: { '--local': 'bare' },
     },
     export: {
         usage: 'agentdef export --format <format> [--out FILE] [--dir .]',
@@ -55,11 +65,13 @@ const COMMANDS = {
             '             codex, copilot, kiro, opencode, windsurf, zed, aider, kimi, grok, antigravity',
             '--out        write to FILE instead of stdout',
         ],
+        flags: { '--format': 'value', '-f': 'value', '--out': 'value', '-o': 'value' },
     },
     install: {
         usage: 'agentdef install [--force] [--dir .]',
         summary: 'materialize the extends chain into .agentdef/parent',
         detail: ['--force      re-clone every ancestor even when the cache is current'],
+        flags: { '--force': 'bare' },
     },
     validate: {
         usage: 'agentdef validate [--dir .]',
@@ -72,6 +84,7 @@ const COMMANDS = {
             '--baseline   baseline file (default: watch-baselines.json in --dir)',
             '--update     record the current fingerprints instead of failing on drift',
         ],
+        flags: { '--baseline': 'value', '--update': 'bare' },
     },
     knowledge: {
         usage: 'agentdef knowledge <hook|unhook|lint> [<claude|gemini>] [--fix] [--dir .]',
@@ -81,6 +94,7 @@ const COMMANDS = {
             '--fix        write the inferred frontmatter instead of only reporting it',
             'hook|unhook  register or remove the SessionStart hook for claude or gemini',
         ],
+        flags: { '--fix': 'bare' },
     },
 };
 function renderHelp(topic) {
@@ -106,6 +120,41 @@ function renderHelp(topic) {
         "run 'agentdef help <command>' or 'agentdef <command> --help' for one command's options.",
         'every command takes --dir, -d to point at an agent directory other than the current one.',
     ].join('\n');
+}
+// Every flag agentdef does not know used to be discarded without a word, which
+// made a typo change what the command did rather than stop it: `-dir` fell back
+// to the current directory, so sync and install operated on the wrong repo and
+// reported success. So it refuses instead, before the command runs. A single-dash
+// long flag (`-help`, `-dir`, `-force`) is the slip people actually make, so it
+// is named as such instead of leaving them to spot it in the usage text.
+function rejectUnknownFlags(command, cmd) {
+    const accepted = { ...GLOBAL_FLAGS, ...cmd.flags };
+    const argv = process.argv.slice(3);
+    const unknown = [];
+    for (let i = 0; i < argv.length; i++) {
+        const arg = argv[i];
+        // Positionals (subcommands, `help <topic>`, `adapters set <tool>...`) and a
+        // bare `-`, which no command reads but which is never a typo'd flag either.
+        if (!arg.startsWith('-') || arg === '-')
+            continue;
+        const arity = accepted[arg];
+        if (arity) {
+            // A value is whatever the user wrote, including something flag-shaped like
+            // `--out -weird`; only the flag itself is ours to judge.
+            if (arity === 'value')
+                i++;
+            continue;
+        }
+        const meant = !arg.startsWith('--') && accepted[`-${arg}`] ? `-${arg}` : undefined;
+        unknown.push(meant ? `${arg} (did you mean ${meant}?)` : arg);
+    }
+    if (unknown.length === 0)
+        return;
+    // Every one at once: two typos should not cost two runs.
+    for (const flag of unknown)
+        console.error(`unknown flag: ${flag}`);
+    console.error(`\n${renderHelp(command)}`);
+    process.exit(1);
 }
 // Nudge users to update the globally installed CLI. update-notifier only prints
 // on a TTY and to stderr, so it never shows in git hooks / pipes / CI and never
@@ -147,6 +196,14 @@ async function main() {
         process.stdout.write(`${renderHelp(topic)}\n`);
         return;
     }
+    // Before the update check and the dispatch, for the same reason --help is:
+    // the answer must arrive before the side effect. An unknown *command* is left
+    // to the default branch below, which already reports it — there is no flag set
+    // to check it against anyway. `knowledge` is not exempt: its --dir decides
+    // which repo's knowledge index gets injected into a session.
+    const help = COMMANDS[command];
+    if (help)
+        rejectUnknownFlags(command, help);
     // `knowledge hook` runs at every session start of the hook-mode tools: skip
     // the update check there — no spawned background process, zero latency, and
     // zero risk of anything but the payload reaching the tool.

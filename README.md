@@ -113,6 +113,8 @@ agentdef knowledge unhook <claude|gemini>   # remove the registered SessionStart
 
 Status goes to stderr and only generated content to stdout, so `agentdef export -f claude-code > CLAUDE.md` is clean.
 
+Every command takes `--help` (and `--dir` to point at an agent directory other than the current one); `agentdef help <command>` prints the same thing. A flag a command does not declare is refused with exit 1 before anything runs, rather than ignored: a dropped `-dir` would have left `sync` regenerating the directory you happened to be standing in and still exiting 0.
+
 ## Choosing your tools (`.agent-adapters`)
 
 `.agent-adapters` lists which tools `sync` generates for, one per line (blank lines and `# ...` comments ignored). It answers "which AI tool does *this developer* use", a personal, per-machine fact, not part of the agent definition, so it is gitignored and never flows through `extends`.
