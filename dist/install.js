@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { loadAgentManifest } from './loader.js';
 import { knowledgeDirName } from './knowledge.js';
 import { AGENTDEF_DIR } from './paths.js';
+import { gitSubprocessEnv } from './git-env.js';
 function isGitSource(source) {
     return (source.endsWith('.git') ||
         source.includes('github.com') ||
@@ -65,7 +66,7 @@ function cloneGitRepo(source, targetDir, version) {
         args.push('--branch', version.replace('^', ''));
     args.push(source, targetDir);
     mkdirSync(join(targetDir, '..'), { recursive: true });
-    execFileSync('git', args, { stdio: 'pipe', timeout: 60_000 });
+    execFileSync('git', args, { stdio: 'pipe', timeout: 60_000, env: gitSubprocessEnv() });
     return sparse;
 }
 // An `include:` entry becomes a git argv element, so it is checked before it can
@@ -137,7 +138,7 @@ function applySparseSelection(targetDir, source, warnings) {
     const args = include
         ? ['sparse-checkout', 'set', '--', ...essentialPathsFor(targetDir, where), ...include]
         : ['sparse-checkout', 'disable'];
-    execFileSync('git', ['-C', targetDir, ...args], { stdio: 'pipe', timeout: 60_000 });
+    execFileSync('git', ['-C', targetDir, ...args], { stdio: 'pipe', timeout: 60_000, env: gitSubprocessEnv() });
     if (!include)
         return;
     // The selection is the step that can empty this cache, so verify rather than
@@ -172,6 +173,7 @@ function gitOut(args, cwd) {
         encoding: 'utf-8',
         stdio: 'pipe',
         timeout: 15_000,
+        env: gitSubprocessEnv(),
     }).trim();
 }
 // Clone into a sibling temp dir, verify, then swap. Failure-safe where a plain

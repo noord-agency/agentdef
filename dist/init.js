@@ -3,8 +3,9 @@ import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { AGENTDEF_DIR, LEGACY_AGENTDEF_DIR } from './paths.js';
 import { knowledgeDirName } from './knowledge.js';
+import { gitSubprocessEnv } from './git-env.js';
 function git(args, cwd) {
-    return execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
+    return execFileSync('git', args, { cwd, encoding: 'utf-8', env: gitSubprocessEnv() }).trim();
 }
 // Ensure the repo ignores the regenerable cache dir, so .agentdef/ (the
 // materialized extends chain) is never committed. Idempotent: appends the entry
@@ -40,7 +41,7 @@ function removeLegacyCache(cwd) {
         return false;
     try {
         // --ignore-unmatch: fine if it was never committed; disk removal still runs.
-        execFileSync('git', ['rm', '-r', '--cached', '--quiet', '--ignore-unmatch', LEGACY_AGENTDEF_DIR], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['rm', '-r', '--cached', '--quiet', '--ignore-unmatch', LEGACY_AGENTDEF_DIR], { cwd, stdio: 'pipe', env: gitSubprocessEnv() });
     }
     catch {
         // not tracked (or git unavailable here); the disk removal below is enough.
@@ -79,10 +80,11 @@ changed=$(git diff-tree -r --name-only --no-commit-id "$1" "$2" 2>/dev/null || t
 ${guard}
 `,
         'post-rewrite': `#!/usr/bin/env bash
-# Installed by 'agentdef init'. Regenerate after a rebase.
+# Installed by 'agentdef init'. Regenerate after a rebase touches agent sources.
 [ "$1" = "rebase" ] || exit 0
 ${MISSING_GUARD}
-exec agentdef sync
+changed=$(git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD 2>/dev/null || true)
+${guard}
 `,
     };
 }
@@ -109,7 +111,7 @@ export function init(dir) {
         current = '';
     }
     if (current) {
-        execFileSync('git', ['config', '--local', '--unset', 'core.hooksPath'], { cwd });
+        execFileSync('git', ['config', '--local', '--unset', 'core.hooksPath'], { cwd, env: gitSubprocessEnv() });
         unsetHooksPath = true;
     }
     const installed = [];
