@@ -79,6 +79,35 @@ ${MISSING_GUARD}
 changed=$(git diff-tree -r --name-only --no-commit-id "$1" "$2" 2>/dev/null || true)
 ${guard}
 `,
+        // The siblings all cover "the change arrived from elsewhere" (pull, checkout,
+        // rebase). None covers the local case: hand-editing a skill leaves the
+        // generated output stale until the next pull. That gap is not Claude-shaped.
+        // KNOWLEDGE_HOOK in hooks.ts only has a SessionStart slot for claude and
+        // gemini; every other tool in SKILL_DIR (cursor, codex, opencode, kiro,
+        // copilot, antigravity) has no hook slot at all. git is the one layer they
+        // all share, so the trigger belongs here rather than once per tool.
+        //
+        // A rebase fires this hook once per replayed commit, so it bails out while
+        // one is in progress. Syncing mid-replay leaves generated files dirty, git
+        // then refuses to overwrite them for the next commit in the todo list, and
+        // the rebase stops half-finished. post-rewrite already syncs a rebase once,
+        // after it lands.
+        //
+        // --root so a repo's very first commit is diffed against the empty tree
+        // instead of silently producing no paths. -m so a merge commit is diffed
+        // against its parents at all: a conflicted merge never reaches post-merge,
+        // and the hand-made commit that finishes it would otherwise report no paths.
+        // -m repeats the diff per parent, so a path can appear several times and the
+        // paths of both sides show up, not just the conflicted ones. Both are
+        // harmless here, the guard execs on the first hit.
+        'post-commit': `#!/usr/bin/env bash
+# Installed by 'agentdef init'. Regenerate after a commit touches agent sources.
+[ -d "$(git rev-parse --git-path rebase-merge)" ] && exit 0
+[ -d "$(git rev-parse --git-path rebase-apply)" ] && exit 0
+${MISSING_GUARD}
+changed=$(git diff-tree -r --name-only --no-commit-id -m --root HEAD 2>/dev/null || true)
+${guard}
+`,
         'post-rewrite': `#!/usr/bin/env bash
 # Installed by 'agentdef init'. Regenerate after a rebase touches agent sources.
 [ "$1" = "rebase" ] || exit 0

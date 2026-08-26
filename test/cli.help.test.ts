@@ -87,7 +87,7 @@ describe('--help never reaches a command', () => {
     assert.ok(!existsSync(join(root, '.gitignore')), 'init --help must not write .gitignore');
     assert.ok(!existsSync(join(root, 'CLAUDE.md')), 'init --help must not run the initial sync');
     const hooks = join(root, '.git', 'hooks');
-    for (const hook of ['post-merge', 'post-checkout', 'post-rewrite']) {
+    for (const hook of ['post-merge', 'post-checkout', 'post-commit', 'post-rewrite']) {
       assert.ok(!existsSync(join(hooks, hook)), `init --help must not install ${hook}`);
     }
   });

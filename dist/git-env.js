@@ -1,4 +1,4 @@
-// Git hooks (post-merge, post-checkout, post-rewrite) run with GIT_DIR and
+// Git hooks (post-merge, post-checkout, post-commit, post-rewrite) run with GIT_DIR and
 // GIT_WORK_TREE already set in the environment, pointing at whichever
 // repository/worktree triggered the hook. Those ambient vars override a
 // `-C <dir>` argument (or a mismatched `cwd`) for every git subprocess spawned
