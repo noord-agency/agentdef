@@ -86,7 +86,7 @@ Per the OKF spec, only `type` is required (a missing one fails `validate`/`sync`
 Unlike skills, knowledge is **indexed, never mirrored**: each tool gets a compact index (type, title, description, pointer) and loads the full document on demand from its real path. Inherited docs (via `extends`) point into the regenerated `.agentdef/` cache; on a path collision the nearest definition wins, like skills. How the index reaches each tool:
 
 - **`claude-code`, `gemini` (hook mode):** `sync` registers a SessionStart hook in `.claude/settings.json` / `.gemini/settings.json` (append-only and idempotent, your other settings are untouched; if the file is not plain JSON, sync warns with a snippet to merge manually). The hook runs `agentdef knowledge hook <tool>`, which renders the index live at every session start, so local edits and pulled parent changes surface without a re-sync. The instruction file carries a breadcrumb instead of the index. On machines without agentdef the hook is a silent no-op. To opt out of hook mode, set `knowledge: { hook: false }` in `agent.yaml` (the instruction files then carry the full static index) and run `agentdef knowledge unhook <claude|gemini>` to remove an already registered entry; a stale entry left behind after deleting `knowledge/` is harmless.
-- **Everyone else (static mode):** the full `## Knowledge` section lands in the instruction file (`AGENTS.md`, `.github/copilot-instructions.md`) or, for Cursor, in an always-applied `.cursor/rules/knowledge-index.mdc`; refreshed on every sync, and the git hooks re-sync when a pull touches `knowledge/`.
+- **Everyone else (static mode):** the full `## Knowledge` section lands in the instruction file (`AGENTS.md`, `.github/copilot-instructions.md`) or, for Cursor, in an always-applied `.cursor/rules/knowledge-index.mdc`; refreshed on every sync, and the git hooks re-sync when a commit or a pull touches `knowledge/`.
 
 A repo without `knowledge/` behaves exactly as before: no section, no hook, no settings file.
 
@@ -114,6 +114,23 @@ agentdef knowledge unhook <claude|gemini>   # remove the registered SessionStart
 Status goes to stderr and only generated content to stdout, so `agentdef export -f claude-code > CLAUDE.md` is clean.
 
 Every command takes `--help` (and `--dir` to point at an agent directory other than the current one); `agentdef help <command>` prints the same thing. A flag a command does not declare is refused with exit 1 before anything runs, rather than ignored: a dropped `-dir` would have left `sync` regenerating the directory you happened to be standing in and still exiting 0.
+
+### The git hooks
+
+`agentdef init` writes four hooks into the repo's local `.git/hooks` (never committed, so every clone runs `init` once). Each one checks whether the change actually touched an agent source (`SOUL.md`, `RULES.md`, `DUTIES.md`, `agent.yaml`, `skills/`, `agents/`, `memory/`, the knowledge dir) and only then execs `agentdef sync`, so an ordinary code commit or pull costs nothing.
+
+| Hook | Fires on | Range it diffs |
+|---|---|---|
+| `post-commit` | `git commit`, including the one that finishes a conflicted merge | the commit just made (`-m --root`, so a first commit and a merge commit are not silently empty) |
+| `post-merge` | a merge or pull that completed on its own | `ORIG_HEAD..HEAD` |
+| `post-checkout` | a branch checkout | the two checked-out trees |
+| `post-rewrite` | a finished rebase | `ORIG_HEAD..HEAD` |
+
+`post-commit` stands down while a rebase is replaying commits. Syncing mid-replay dirties generated files that git then refuses to overwrite for the next commit in the todo list, which aborts the rebase; `post-rewrite` covers rebases anyway, once, at the end.
+
+A `core.hooksPath` set for the repo is unset by `init`, since it would send git to a different directory. One set globally or system-wide wins the same way but is not agentdef's to remove, so `init` reports it and leaves it alone.
+
+If `agentdef` is not on `PATH` the hooks print one line and exit 0, so a repo stays usable for someone who has not installed it.
 
 ## Choosing your tools (`.agent-adapters`)
 
