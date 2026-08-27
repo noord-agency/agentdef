@@ -332,3 +332,46 @@ describe('post-commit hook behaviour (during a rebase)', () => {
     }, generate);
   });
 });
+
+// A hooksPath pointing somewhere else wins over .git/hooks no matter which scope
+// set it, and init may only clean up the repo's own. One set globally survives,
+// and the failure is the quiet kind: init writes four hooks, reports four hooks,
+// and git runs a different directory's, or none at all.
+describe('init and a core.hooksPath it is not allowed to clean up', () => {
+  function withGlobalGitConfig<T>(contents: string, fn: () => T): T {
+    const home = mkdtempSync(join(tmpdir(), 'agentdef-global-gitconfig-'));
+    dirs.push(home);
+    const path = join(home, 'gitconfig');
+    writeFileSync(path, contents);
+    const key = 'GIT_CONFIG_GLOBAL';
+    const restore = process.env[key];
+    process.env[key] = path;
+    try {
+      return fn();
+    } finally {
+      if (restore === undefined) delete process.env[key];
+      else process.env[key] = restore;
+    }
+  }
+
+  test('a globally set one is reported, not silently overridden', () => {
+    const root = fixture();
+    const elsewhere = join(root, 'not-the-hooks-dir');
+
+    const res = withGlobalGitConfig(`[core]\n\thooksPath = ${elsewhere}\n`, () => init(root));
+
+    assert.equal(res.externalHooksPath, elsewhere);
+    assert.equal(res.unsetHooksPath, false, 'there was nothing local to unset');
+    // The hooks still get written. They just would not run, which is the whole
+    // reason for saying so.
+    assert.ok(res.installed.includes('post-commit'));
+  });
+
+  test('an ordinary repo reports none', () => {
+    const root = fixture();
+
+    const res = withGlobalGitConfig('', () => init(root));
+
+    assert.equal(res.externalHooksPath, '');
+  });
+});

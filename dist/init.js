@@ -143,6 +143,18 @@ export function init(dir) {
         execFileSync('git', ['config', '--local', '--unset', 'core.hooksPath'], { cwd, env: gitSubprocessEnv() });
         unsetHooksPath = true;
     }
+    // Whatever is left comes from the global or system scope, and it wins over
+    // .git/hooks just the same. Unsetting a machine-wide setting from a per-repo
+    // command would be overreach, so this is reported, not repaired: without it
+    // init writes four hooks, says so, and git runs a different directory's hooks
+    // or none at all, which is the exact silence agentdef exists to avoid.
+    let externalHooksPath = '';
+    try {
+        externalHooksPath = git(['config', '--get', 'core.hooksPath'], cwd);
+    }
+    catch {
+        externalHooksPath = '';
+    }
     const installed = [];
     for (const [name, body] of Object.entries(buildHooks(knowledgeDir))) {
         const path = join(hooksDir, name);
@@ -152,5 +164,5 @@ export function init(dir) {
     }
     const gitignoreAdded = ensureGitignore(cwd);
     const legacyRemoved = removeLegacyCache(cwd);
-    return { hooksDir, installed, unsetHooksPath, gitignoreAdded, legacyRemoved };
+    return { hooksDir, installed, unsetHooksPath, externalHooksPath, gitignoreAdded, legacyRemoved };
 }

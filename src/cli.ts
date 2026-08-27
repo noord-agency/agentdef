@@ -453,6 +453,11 @@ async function main(): Promise<void> {
       const res = init(dir);
       console.error(`installed hooks in ${res.hooksDir}: ${res.installed.join(', ')}`);
       if (res.unsetHooksPath) console.error('unset core.hooksPath so the installed hooks run');
+      if (res.externalHooksPath) {
+        console.error(
+          `warning: core.hooksPath is set outside this repo (${res.externalHooksPath}); git runs that directory, not the hooks just installed. Clear it with 'git config --global --unset core.hooksPath'.`,
+        );
+      }
       if (res.gitignoreAdded) console.error('added .agentdef/ to .gitignore (regenerable cache, never commit it)');
       if (res.legacyRemoved) console.error('migrated: removed legacy .gitagent/ (untracked + deleted); commit the change');
       // First sync, so `agentdef init` is the entire one-time setup. --no-sync
@@ -468,7 +473,7 @@ async function main(): Promise<void> {
           for (const warning of sres.warnings) console.error(warning);
         }
       }
-      console.error('done. agentdef sync now runs automatically after pull/merge/checkout/rebase.');
+      console.error('done. agentdef sync now runs automatically after commit/pull/merge/checkout/rebase.');
       break;
     }
 

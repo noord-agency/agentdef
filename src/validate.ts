@@ -4,7 +4,7 @@ import { AGENTDEF_DIR } from './paths.js';
 import { loadAgentManifest } from './loader.js';
 import { parseIncludeList } from './install.js';
 import { resolveIdentity } from './merge.js';
-import { loadAllSkills } from './skills.js';
+import { collectSkills } from './skills.js';
 import { collectKnowledgeMetadata, renderKnowledgeIndex } from './knowledge.js';
 
 export interface ValidationIssue {
@@ -117,10 +117,27 @@ export function validate(dir: string): ValidationIssue[] {
 
   // parseSkillMd throws on malformed frontmatter or missing name/description,
   // which surfaces here as an error rather than being silently skipped.
+  //
+  // Chain-wide, like the knowledge check below and unlike this check until now:
+  // sync and every adapter read skills through collectSkills (local + parent +
+  // deps), so a validate that looked only at the local skills/ reported green on
+  // a chain sync then refused to build. It sees what is materialized, though: in
+  // a checkout that never ran sync there is no .agentdef/parent and the chain
+  // collapses back to the local directory.
   try {
-    loadAllSkills(join(agentDir, 'skills'));
+    collectSkills(agentDir);
   } catch (e) {
-    issues.push({ level: 'error', message: `skills: ${(e as Error).message}` });
+    const message = (e as Error).message;
+    issues.push({
+      level: 'error',
+      message: `skills: ${message}`,
+      // Same reasoning as the knowledge hint: an inherited skill is not fixable
+      // here, and saying so beats the reader editing a file under .agentdef/ that
+      // the next sync overwrites.
+      hint: message.includes(`${AGENTDEF_DIR}${sep}`)
+        ? `inherited skills live in the parent repo; fix them there, then re-run 'agentdef sync'`
+        : undefined,
+    });
   }
 
   // Chain-wide (sync gates on this): every broken knowledge doc surfaces at

@@ -17,7 +17,10 @@ const RESERVED_FILES = new Set(['index.md', 'log.md']);
 // The one shape a knowledge doc must have. Shared so discovery and validation
 // agree on what counts as frontmatter — a README skipped here but parsed there
 // would reintroduce exactly the false positive this is meant to remove.
-const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---/;
+// \r? for the same reason as in skills.ts: a Windows checkout of an LF blob
+// delivers ---\r\n, and rejecting that as "no frontmatter" broke every doc in
+// the repo at once.
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 // README.md is a folder explainer by repo convention, not an OKF concept doc, so
 // a plain one is skipped rather than reported as broken. Unlike index.md/log.md
 // the skip is conditional: a README that deliberately carries OKF frontmatter

@@ -11,11 +11,19 @@ export function getAllowedTools(frontmatter) {
         return [];
     return tools.split(/\s+/).filter(Boolean);
 }
+// Line endings are the checkout's business, not the parser's. git hands a
+// Windows working tree ---\r\n for the same LF blob everyone else gets
+// (core.autocrlf=true is the Windows default), and an LF-strict ^---\n rejects
+// such a file as having no frontmatter at all, for every skill at once. Pinning
+// SKILL.md to eol=lf in each consuming repo's .gitattributes worked, but it is a
+// workaround that has to be remembered once per repo, and it was not.
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
+const FRONTMATTER_WITH_BODY_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)*([\s\S]*)$/;
 // Lightweight: frontmatter only (name, description, allowed-tools). Used for the
 // CLAUDE.md skills index, where Claude Code loads each SKILL.md on demand.
 export function loadSkillMetadata(filePath) {
     const content = readFileSync(filePath, 'utf-8');
-    const match = content.match(/^---\n([\s\S]*?)\n---/);
+    const match = content.match(FRONTMATTER_RE);
     if (!match) {
         throw new Error(`SKILL.md at ${filePath} is missing YAML frontmatter (---)`);
     }
@@ -36,7 +44,7 @@ export function loadSkillMetadata(filePath) {
 // every skill because tools read it as a single file.
 export function parseSkillMd(filePath) {
     const content = readFileSync(filePath, 'utf-8');
-    const match = content.match(/^---\n([\s\S]*?)\n---\n*([\s\S]*)$/);
+    const match = content.match(FRONTMATTER_WITH_BODY_RE);
     if (!match) {
         throw new Error(`SKILL.md at ${filePath} is missing YAML frontmatter (---)`);
     }
