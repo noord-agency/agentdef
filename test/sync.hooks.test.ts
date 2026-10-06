@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { init, buildHooks, hookRunner } from '../src/init.js';
+import { init, buildHooks, hookRunner, HOOK_NAMES, type HookRunner } from '../src/init.js';
 import { sync } from '../src/sync.js';
 
 const dirs: string[] = [];
@@ -51,6 +51,19 @@ function fixture(agentYaml = 'name: t\ndescription: t\n'): string {
 
 const hook = (root: string, name: string) => join(root, '.git', 'hooks', name);
 const REFRESHED = /^git hooks refreshed: /;
+const NOT_REFRESHED = /^warning: git hooks not refreshed/;
+
+// What an installed agentdef bakes: a node and a CLI entry that both exist. The
+// default runner cannot stand in for it here: under tsx its CLI entry is
+// src/cli.js, which does not exist, and sync refuses to bake that (see below).
+function installedRunner(): HookRunner {
+  const base = mkdtempSync(join(tmpdir(), 'agentdef-installed-'));
+  dirs.push(base);
+  mkdirSync(join(base, 'dist'));
+  writeFileSync(join(base, 'dist', 'cli.js'), '');
+  return { node: process.execPath, cli: join(base, 'dist', 'cli.js') };
+}
+const GONE: HookRunner = { node: '/nonexistent/agentdef-test/node', cli: '/nonexistent/agentdef-test/dist/cli.js' };
 
 // What 0.8.5 installed: PATH only, so it skipped under every GUI git client.
 const OLD_POST_MERGE = `#!/usr/bin/env bash
@@ -68,16 +81,17 @@ const FOREIGN = '#!/bin/sh\n# lefthook, or something written by hand\nexec lefth
 describe('sync refreshes the hooks agentdef installed', () => {
   test('a hook from an older agentdef is rewritten, hooks agentdef did not write are not', () => {
     const root = fixture();
-    init(root);
+    const runner = installedRunner();
+    init(root, runner);
     writeFileSync(hook(root, 'post-merge'), OLD_POST_MERGE);
     // Same name as one of ours, but someone else's file now.
     writeFileSync(hook(root, 'post-checkout'), FOREIGN);
     writeFileSync(hook(root, 'pre-commit'), FOREIGN);
 
-    const res = sync(root);
+    const res = sync(root, { runner });
 
     assert.deepEqual(res.written.filter((w) => REFRESHED.test(w)), ['git hooks refreshed: post-merge']);
-    assert.equal(readFileSync(hook(root, 'post-merge'), 'utf-8'), buildHooks('knowledge', hookRunner())['post-merge']);
+    assert.equal(readFileSync(hook(root, 'post-merge'), 'utf-8'), buildHooks('knowledge', runner)['post-merge']);
     assert.equal(statSync(hook(root, 'post-merge')).mode & 0o777, 0o755, 'still executable');
     assert.equal(readFileSync(hook(root, 'post-checkout'), 'utf-8'), FOREIGN);
     assert.equal(readFileSync(hook(root, 'pre-commit'), 'utf-8'), FOREIGN);
@@ -85,10 +99,11 @@ describe('sync refreshes the hooks agentdef installed', () => {
 
   test('hooks that already match are left alone and nothing is reported', () => {
     const root = fixture();
-    init(root);
+    const runner = installedRunner();
+    init(root, runner);
     const before = readFileSync(hook(root, 'post-commit'), 'utf-8');
 
-    const res = sync(root);
+    const res = sync(root, { runner });
 
     assert.equal(res.written.filter((w) => REFRESHED.test(w)).length, 0);
     assert.equal(readFileSync(hook(root, 'post-commit'), 'utf-8'), before);
@@ -98,10 +113,11 @@ describe('sync refreshes the hooks agentdef installed', () => {
   // second init before the hooks watched the new name.
   test('a renamed knowledge dir reaches the hooks on the next sync', () => {
     const root = fixture();
-    init(root);
+    const runner = installedRunner();
+    init(root, runner);
     write(root, { 'agent.yaml': 'name: t\ndescription: t\nknowledge:\n  dir: docs\n' });
 
-    const res = sync(root);
+    const res = sync(root, { runner });
 
     assert.equal(res.written.filter((w) => REFRESHED.test(w)).length, 1);
     for (const name of ['post-merge', 'post-checkout', 'post-commit', 'post-rewrite']) {
@@ -121,32 +137,70 @@ describe('sync refreshes the hooks agentdef installed', () => {
       'sub/SOUL.md': '# sub\n',
       'sub/.agent-adapters': 'claude-code\n',
     });
-    init(root);
+    const runner = installedRunner();
+    init(root, runner);
 
-    const nested = sync(join(root, 'sub'));
+    const nested = sync(join(root, 'sub'), { runner });
 
     assert.equal(nested.written.filter((w) => REFRESHED.test(w)).length, 0);
     for (const name of ['post-merge', 'post-checkout', 'post-commit', 'post-rewrite']) {
       assert.match(readFileSync(hook(root, name), 'utf-8'), /\|knowledge\/\*\) agentdef_sync ;;/, name);
     }
-    assert.equal(sync(root).written.filter((w) => REFRESHED.test(w)).length, 0, 'nothing for the next sync to undo');
+    assert.equal(sync(root, { runner }).written.filter((w) => REFRESHED.test(w)).length, 0, 'nothing for the next sync to undo');
   });
 
   // sync runs in CI checkouts and in repos nobody ran init in. Installing hooks
   // there is init's decision, not a side effect of generating files.
   test('a hook that is not there is not installed', () => {
     const root = fixture();
-    init(root);
+    const runner = installedRunner();
+    init(root, runner);
     rmSync(hook(root, 'post-commit'));
     const bare = fixture();
 
-    sync(root);
-    sync(bare);
+    sync(root, { runner });
+    sync(bare, { runner });
 
     assert.ok(!existsSync(hook(root, 'post-commit')));
     for (const name of ['post-merge', 'post-checkout', 'post-commit', 'post-rewrite']) {
       assert.ok(!existsSync(hook(bare, name)), name);
     }
+  });
+
+  // `npm run dev` runs the CLI under tsx, where the CLI entry is src/cli.js and
+  // does not exist. Rewriting working hooks to it sent every GUI commit back to
+  // the PATH fallback and the skip record until an installed agentdef synced.
+  test('an agentdef whose own paths do not exist leaves working hooks alone, and says so', () => {
+    const root = fixture();
+    init(root, installedRunner());
+    const before = HOOK_NAMES.map((name) => readFileSync(hook(root, name), 'utf-8'));
+
+    const res = sync(root, { runner: GONE });
+
+    assert.equal(res.written.filter((w) => REFRESHED.test(w)).length, 0);
+    assert.deepEqual(HOOK_NAMES.map((name) => readFileSync(hook(root, name), 'utf-8')), before);
+    const warning = res.warnings.find((w) => NOT_REFRESHED.test(w));
+    assert.ok(warning, 'a hook left stale must be reported');
+    assert.ok(warning.includes(GONE.cli), 'names the path that is missing');
+  });
+
+  test('so does the default runner under tsx, the `npm run dev` case', () => {
+    assert.ok(!existsSync(hookRunner().cli), 'precondition: the tsx default has no cli.js');
+    const root = fixture();
+    const runner = installedRunner();
+    init(root, runner);
+
+    const res = sync(root);
+
+    assert.equal(readFileSync(hook(root, 'post-commit'), 'utf-8'), buildHooks('knowledge', runner)['post-commit']);
+    assert.ok(res.warnings.some((w) => NOT_REFRESHED.test(w)));
+  });
+
+  // init still installs (that is what it was asked for, and the PATH fallback
+  // works from a terminal), but it must not claim the hooks reach agentdef.
+  test('init installs with such a runner but reports the missing paths', () => {
+    assert.deepEqual(init(fixture(), GONE).runnerMissing, [GONE.node, GONE.cli]);
+    assert.deepEqual(init(fixture(), installedRunner()).runnerMissing, []);
   });
 });
 

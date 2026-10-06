@@ -91,11 +91,19 @@ export interface HookRunnerSource {
 // process.argv[1], which is the CLI only when the CLI is what is running. init()
 // and sync() are also called in-process (the tests, `npm run dev` under tsx),
 // and argv[1] is then a test file the hook would go on to execute. Under tsx
-// there is no src/cli.js; the path is baked anyway, and the hook, which checks
-// both paths before using them, falls back to PATH.
+// there is no src/cli.js. init bakes it anyway and warns (the hook checks both
+// paths and falls back to PATH), and refreshHooks refuses to bake it at all,
+// see missingRunnerPaths.
 function ownCliPath(): string {
   const path = fileURLToPath(new URL('./cli.js', import.meta.url));
   return existsSync(path) ? realpathSync(path) : path;
+}
+
+// The baked paths that do not exist. A hook skips such a runner and falls back
+// to PATH, so these paths are worth a warning from init and are never a
+// reason for sync to replace hooks that might call a runner that works.
+export function missingRunnerPaths(runner: HookRunner): string[] {
+  return [runner.node, runner.cli].filter((path) => !existsSync(path));
 }
 
 // Platform and paths are parameters so the Windows rendering can be tested on
@@ -216,6 +224,9 @@ export interface InitResult {
   // A core.hooksPath that survives the unset below, i.e. one set globally or
   // system-wide. Empty when there is none.
   externalHooksPath: string;
+  // Baked runner paths that do not exist (agentdef run from source), so the
+  // hooks fall back to PATH. Empty for an installed agentdef.
+  runnerMissing: string[];
   gitignoreAdded: boolean;
   legacyRemoved: boolean;
 }
@@ -280,9 +291,21 @@ export function init(dir: string, runner: HookRunner = hookRunner()): InitResult
     installed.push(name);
   }
 
+  // Still installed: init is asked for hooks, and with the PATH fallback they
+  // work from a terminal. The caller says what they will not do.
+  const runnerMissing = missingRunnerPaths(runner);
+
   const gitignoreAdded = ensureGitignore(cwd);
   const legacyRemoved = removeLegacyCache(cwd);
-  return { hooksDir, installed, unsetHooksPath, externalHooksPath, gitignoreAdded, legacyRemoved };
+  return { hooksDir, installed, unsetHooksPath, externalHooksPath, runnerMissing, gitignoreAdded, legacyRemoved };
+}
+
+export interface HookRefresh {
+  refreshed: HookName[];
+  // Why agentdef's hooks differ from what this agentdef would install and were
+  // left that way, for sync to print as a warning. Empty when nothing stood in
+  // the way.
+  notRefreshed: string;
 }
 
 // The hooks live in .git/hooks, outside the repo and outside the npm package,
@@ -291,7 +314,7 @@ export function init(dir: string, runner: HookRunner = hookRunner()): InitResult
 // when forgotten. The baked paths add a third way to go stale, a node upgrade
 // that removes the old binary. sync runs constantly (mostly from these very
 // hooks), so it brings them up to date, with the same directory and knowledge
-// dir init uses. Returns the names of the hooks it rewrote.
+// dir init uses.
 //
 // Only files carrying init's marker are agentdef's. Anything else in
 // .git/hooks (husky, lefthook, a hand-written hook) is left untouched, and a
@@ -306,7 +329,14 @@ export function init(dir: string, runner: HookRunner = hookRunner()): InitResult
 // `--dir sub` shares the repo's hooks without being what they sync; refreshing
 // from it pointed them at its knowledge dir, and the next top-level sync
 // flipped them back.
-export function refreshHooks(dir: string, runner: HookRunner = hookRunner()): HookName[] {
+//
+// A runner that cannot run never replaces one that might. Under `npm run dev`
+// (tsx) the CLI entry is src/cli.js, which does not exist; rewriting working
+// hooks to it sent every GUI commit back to the PATH fallback and the skip
+// record until an installed agentdef synced again. Such hooks are left as they
+// are, and notRefreshed says why.
+export function refreshHooks(dir: string, runner: HookRunner = hookRunner()): HookRefresh {
+  const none: HookRefresh = { refreshed: [], notRefreshed: '' };
   const cwd = resolve(dir);
   // stdio piped: outside a repo git prints "fatal: not a git repository",
   // which is not news for a sync running in a plain directory.
@@ -318,9 +348,9 @@ export function refreshHooks(dir: string, runner: HookRunner = hookRunner()): Ho
     gitDir = quietGit(['rev-parse', '--absolute-git-dir']);
     prefix = quietGit(['rev-parse', '--show-prefix']);
   } catch {
-    return []; // not a git checkout (a CI tarball, a plain directory), so no hooks
+    return none; // not a git checkout (a CI tarball, a plain directory), so no hooks
   }
-  if (prefix !== '') return []; // a nested agent, not the one the hooks sync
+  if (prefix !== '') return none; // a nested agent, not the one the hooks sync
   const hooksDir = join(gitDir, 'hooks');
 
   const ours = new Map<HookName, string>();
@@ -332,14 +362,19 @@ export function refreshHooks(dir: string, runner: HookRunner = hookRunner()): Ho
   }
   // Checked only when there is something to refresh, so a repo without hooks
   // (every CI run) never fails a sync over the knowledge dir name.
-  if (ours.size === 0) return [];
+  if (ours.size === 0) return none;
 
   const wanted = buildHooks(hookKnowledgeDir(cwd), runner);
-  const refreshed: HookName[] = [];
-  for (const [name, text] of ours) {
-    if (text === wanted[name]) continue;
-    writeHook(join(hooksDir, name), wanted[name]);
-    refreshed.push(name);
+  const stale = [...ours].filter(([name, text]) => text !== wanted[name]).map(([name]) => name);
+  if (stale.length === 0) return none;
+
+  const missing = missingRunnerPaths(runner);
+  if (missing.length > 0) {
+    return {
+      refreshed: [],
+      notRefreshed: `git hooks not refreshed (${stale.join(', ')}): ${missing.join(' and ')} ${missing.length === 1 ? 'does' : 'do'} not exist, so this agentdef is not one a hook can run (running from source?). The next sync from an installed agentdef refreshes them.`,
+    };
   }
-  return refreshed;
+  for (const name of stale) writeHook(join(hooksDir, name), wanted[name]);
+  return { refreshed: stale, notRefreshed: '' };
 }

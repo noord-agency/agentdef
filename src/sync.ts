@@ -10,7 +10,7 @@ import { exportToCursorFiles } from './adapters/cursor.js';
 import { mirrorSkillDirs, mirrorAgentFiles } from './mirror.js';
 import { collectKnowledgeMetadata, knowledgeHookEnabled } from './knowledge.js';
 import { ensureSessionHook, KNOWLEDGE_HOOK } from './hooks.js';
-import { refreshHooks } from './init.js';
+import { refreshHooks, type HookRunner } from './init.js';
 import { LEGACY_AGENTDEF_DIR, SYNC_SKIPPED } from './paths.js';
 
 // Where each tool reads its skills / sub-agents from.
@@ -207,7 +207,12 @@ export interface SyncResult {
 // The orchestrator: read the adapter list, resolve extends, validate, then for
 // each adapter generate its instruction file and mirror skills/agents into its
 // tool dir. No sandbox needed: nothing here writes into committed source.
-export function sync(dir: string, opts: { adapters?: string[]; force?: boolean } = {}): SyncResult {
+// `runner` is the agentdef refreshed hooks will call; a parameter only so tests
+// can point it at paths that exist (under tsx the default has no cli.js).
+export function sync(
+  dir: string,
+  opts: { adapters?: string[]; force?: boolean; runner?: HookRunner } = {},
+): SyncResult {
   const agentDir = resolve(dir);
   const adapters = readAdapters(agentDir, opts.adapters);
   if (adapters.length === 0) throw new Error('no adapters selected');
@@ -273,8 +278,9 @@ export function sync(dir: string, opts: { adapters?: string[]; force?: boolean }
 
   // Hooks written by an older agentdef, or by another install of it, are
   // brought up to date here, so an upgrade reaches them without a second init.
-  const refreshed = refreshHooks(agentDir);
-  if (refreshed.length > 0) written.push(`git hooks refreshed: ${refreshed.join(', ')}`);
+  const hooks = refreshHooks(agentDir, opts.runner);
+  if (hooks.refreshed.length > 0) written.push(`git hooks refreshed: ${hooks.refreshed.join(', ')}`);
+  if (hooks.notRefreshed) warnings.push(`warning: ${hooks.notRefreshed}`);
 
   // A hook that had a sync to run and found no agentdef says so on stderr, which
   // a GUI git client never shows, and in this file. Reaching this point means
@@ -287,7 +293,9 @@ export function sync(dir: string, opts: { adapters?: string[]; force?: boolean }
       [
         `warning: git hooks skipped ${log.length} sync(s) because they could not find agentdef (${SYNC_SKIPPED}):`,
         ...log.map((l) => `  ${l}`),
-        '  this sync has caught up, and the hooks now call the agentdef that ran it.',
+        hooks.notRefreshed
+          ? '  this sync has caught up.'
+          : '  this sync has caught up, and the hooks now call the agentdef that ran it.',
       ].join('\n'),
     );
     rmSync(skippedPath, { force: true });

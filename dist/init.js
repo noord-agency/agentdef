@@ -66,11 +66,18 @@ done`;
 // process.argv[1], which is the CLI only when the CLI is what is running. init()
 // and sync() are also called in-process (the tests, `npm run dev` under tsx),
 // and argv[1] is then a test file the hook would go on to execute. Under tsx
-// there is no src/cli.js; the path is baked anyway, and the hook, which checks
-// both paths before using them, falls back to PATH.
+// there is no src/cli.js. init bakes it anyway and warns (the hook checks both
+// paths and falls back to PATH), and refreshHooks refuses to bake it at all,
+// see missingRunnerPaths.
 function ownCliPath() {
     const path = fileURLToPath(new URL('./cli.js', import.meta.url));
     return existsSync(path) ? realpathSync(path) : path;
+}
+// The baked paths that do not exist. A hook skips such a runner and falls back
+// to PATH, so these paths are worth a warning from init and are never a
+// reason for sync to replace hooks that might call a runner that works.
+export function missingRunnerPaths(runner) {
+    return [runner.node, runner.cli].filter((path) => !existsSync(path));
 }
 // Platform and paths are parameters so the Windows rendering can be tested on
 // any OS. Git for Windows runs hooks in Git Bash, which executes
@@ -229,9 +236,12 @@ export function init(dir, runner = hookRunner()) {
         writeHook(join(hooksDir, name), body);
         installed.push(name);
     }
+    // Still installed: init is asked for hooks, and with the PATH fallback they
+    // work from a terminal. The caller says what they will not do.
+    const runnerMissing = missingRunnerPaths(runner);
     const gitignoreAdded = ensureGitignore(cwd);
     const legacyRemoved = removeLegacyCache(cwd);
-    return { hooksDir, installed, unsetHooksPath, externalHooksPath, gitignoreAdded, legacyRemoved };
+    return { hooksDir, installed, unsetHooksPath, externalHooksPath, runnerMissing, gitignoreAdded, legacyRemoved };
 }
 // The hooks live in .git/hooks, outside the repo and outside the npm package,
 // so upgrading agentdef never reached them: every hook change so far needed a
@@ -239,7 +249,7 @@ export function init(dir, runner = hookRunner()) {
 // when forgotten. The baked paths add a third way to go stale, a node upgrade
 // that removes the old binary. sync runs constantly (mostly from these very
 // hooks), so it brings them up to date, with the same directory and knowledge
-// dir init uses. Returns the names of the hooks it rewrote.
+// dir init uses.
 //
 // Only files carrying init's marker are agentdef's. Anything else in
 // .git/hooks (husky, lefthook, a hand-written hook) is left untouched, and a
@@ -254,7 +264,14 @@ export function init(dir, runner = hookRunner()) {
 // `--dir sub` shares the repo's hooks without being what they sync; refreshing
 // from it pointed them at its knowledge dir, and the next top-level sync
 // flipped them back.
+//
+// A runner that cannot run never replaces one that might. Under `npm run dev`
+// (tsx) the CLI entry is src/cli.js, which does not exist; rewriting working
+// hooks to it sent every GUI commit back to the PATH fallback and the skip
+// record until an installed agentdef synced again. Such hooks are left as they
+// are, and notRefreshed says why.
 export function refreshHooks(dir, runner = hookRunner()) {
+    const none = { refreshed: [], notRefreshed: '' };
     const cwd = resolve(dir);
     // stdio piped: outside a repo git prints "fatal: not a git repository",
     // which is not news for a sync running in a plain directory.
@@ -266,10 +283,10 @@ export function refreshHooks(dir, runner = hookRunner()) {
         prefix = quietGit(['rev-parse', '--show-prefix']);
     }
     catch {
-        return []; // not a git checkout (a CI tarball, a plain directory), so no hooks
+        return none; // not a git checkout (a CI tarball, a plain directory), so no hooks
     }
     if (prefix !== '')
-        return []; // a nested agent, not the one the hooks sync
+        return none; // a nested agent, not the one the hooks sync
     const hooksDir = join(gitDir, 'hooks');
     const ours = new Map();
     for (const name of HOOK_NAMES) {
@@ -283,14 +300,19 @@ export function refreshHooks(dir, runner = hookRunner()) {
     // Checked only when there is something to refresh, so a repo without hooks
     // (every CI run) never fails a sync over the knowledge dir name.
     if (ours.size === 0)
-        return [];
+        return none;
     const wanted = buildHooks(hookKnowledgeDir(cwd), runner);
-    const refreshed = [];
-    for (const [name, text] of ours) {
-        if (text === wanted[name])
-            continue;
-        writeHook(join(hooksDir, name), wanted[name]);
-        refreshed.push(name);
+    const stale = [...ours].filter(([name, text]) => text !== wanted[name]).map(([name]) => name);
+    if (stale.length === 0)
+        return none;
+    const missing = missingRunnerPaths(runner);
+    if (missing.length > 0) {
+        return {
+            refreshed: [],
+            notRefreshed: `git hooks not refreshed (${stale.join(', ')}): ${missing.join(' and ')} ${missing.length === 1 ? 'does' : 'do'} not exist, so this agentdef is not one a hook can run (running from source?). The next sync from an installed agentdef refreshes them.`,
+        };
     }
-    return refreshed;
+    for (const name of stale)
+        writeHook(join(hooksDir, name), wanted[name]);
+    return { refreshed: stale, notRefreshed: '' };
 }

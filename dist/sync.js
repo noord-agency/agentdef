@@ -174,6 +174,8 @@ export function knownAdapters() {
 // The orchestrator: read the adapter list, resolve extends, validate, then for
 // each adapter generate its instruction file and mirror skills/agents into its
 // tool dir. No sandbox needed: nothing here writes into committed source.
+// `runner` is the agentdef refreshed hooks will call; a parameter only so tests
+// can point it at paths that exist (under tsx the default has no cli.js).
 export function sync(dir, opts = {}) {
     const agentDir = resolve(dir);
     const adapters = readAdapters(agentDir, opts.adapters);
@@ -235,9 +237,11 @@ export function sync(dir, opts = {}) {
     }
     // Hooks written by an older agentdef, or by another install of it, are
     // brought up to date here, so an upgrade reaches them without a second init.
-    const refreshed = refreshHooks(agentDir);
-    if (refreshed.length > 0)
-        written.push(`git hooks refreshed: ${refreshed.join(', ')}`);
+    const hooks = refreshHooks(agentDir, opts.runner);
+    if (hooks.refreshed.length > 0)
+        written.push(`git hooks refreshed: ${hooks.refreshed.join(', ')}`);
+    if (hooks.notRefreshed)
+        warnings.push(`warning: ${hooks.notRefreshed}`);
     // A hook that had a sync to run and found no agentdef says so on stderr, which
     // a GUI git client never shows, and in this file. Reaching this point means
     // the skipped work is done, so the record is reported once and cleared. A
@@ -248,7 +252,9 @@ export function sync(dir, opts = {}) {
         warnings.push([
             `warning: git hooks skipped ${log.length} sync(s) because they could not find agentdef (${SYNC_SKIPPED}):`,
             ...log.map((l) => `  ${l}`),
-            '  this sync has caught up, and the hooks now call the agentdef that ran it.',
+            hooks.notRefreshed
+                ? '  this sync has caught up.'
+                : '  this sync has caught up, and the hooks now call the agentdef that ran it.',
         ].join('\n'));
         rmSync(skippedPath, { force: true });
     }

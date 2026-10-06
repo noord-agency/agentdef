@@ -442,6 +442,9 @@ async function main() {
             if (res.externalHooksPath) {
                 console.error(`warning: core.hooksPath is set outside this repo (${res.externalHooksPath}); git runs that directory, not the hooks just installed. Clear it with 'git config --global --unset core.hooksPath'.`);
             }
+            if (res.runnerMissing.length > 0) {
+                console.error(`warning: the hooks call ${res.runnerMissing.join(' and ')}, which ${res.runnerMissing.length === 1 ? 'does' : 'do'} not exist (agentdef running from source?), so they fall back to agentdef on PATH, which a GUI git client does not have. The next sync from an installed agentdef refreshes them.`);
+            }
             if (res.gitignoreAdded)
                 console.error('added .agentdef/ to .gitignore (regenerable cache, never commit it)');
             if (res.legacyRemoved)

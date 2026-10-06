@@ -1,3 +1,4 @@
+import { type HookRunner } from './init.js';
 export declare const KNOWN_ADAPTERS: Set<string>;
 export declare function machineAdaptersPath(): string;
 export type AdapterSource = 'flag' | 'repo' | 'machine' | 'none';
@@ -29,4 +30,5 @@ export interface SyncResult {
 export declare function sync(dir: string, opts?: {
     adapters?: string[];
     force?: boolean;
+    runner?: HookRunner;
 }): SyncResult;
