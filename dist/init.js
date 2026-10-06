@@ -358,7 +358,7 @@ export function init(dir, runner = hookRunner()) {
 // record until an installed agentdef synced again. Such hooks are left as they
 // are, and notRefreshed says why.
 export function refreshHooks(dir, runner = hookRunner()) {
-    const none = { refreshed: [], notRefreshed: '', current: false };
+    const none = { refreshed: [], notRefreshed: '', current: false, gitignoreAdded: false };
     const cwd = resolve(dir);
     // stdio piped: outside a repo git prints "fatal: not a git repository",
     // which is not news for a sync running in a plain directory.
@@ -400,6 +400,7 @@ export function refreshHooks(dir, runner = hookRunner()) {
             refreshed: [],
             notRefreshed: `git hooks not refreshed: ${problem}, so they keep watching the knowledge dir they were written for.`,
             current: false,
+            gitignoreAdded: false,
         };
     }
     // A node path already in a hook stays when it is the binary this agentdef
@@ -415,13 +416,14 @@ export function refreshHooks(dir, runner = hookRunner()) {
     }
     const stale = [...ours].filter(([name, text]) => text !== wanted.get(name)).map(([name]) => name);
     if (stale.length === 0)
-        return { refreshed: [], notRefreshed: '', current: true };
+        return { refreshed: [], notRefreshed: '', current: true, gitignoreAdded: false };
     const missing = missingRunnerPaths(runner);
     if (missing.length > 0) {
         return {
             refreshed: [],
             notRefreshed: `git hooks not refreshed (${stale.join(', ')}): ${missing.join(' and ')} ${missing.length === 1 ? 'does' : 'do'} not exist, so this agentdef is not one a hook can run (running from source?). The next sync from an installed agentdef refreshes them.`,
             current: false,
+            gitignoreAdded: false,
         };
     }
     // A hook that cannot be written (a read-only .git, a hook another process
@@ -439,12 +441,18 @@ export function refreshHooks(dir, runner = hookRunner()) {
             failed.push(`${name} (${err.message})`);
         }
     }
+    // A refreshed hook writes its skip record into .agentdef/. init has
+    // gitignored that dir since the cache moved there, but repos set up before
+    // that never got the entry, and a GUI client that commits every change
+    // would commit the record. So a refresh makes sure the entry is there.
+    const gitignoreAdded = refreshed.length > 0 && ensureGitignore(cwd);
     if (failed.length > 0) {
         return {
             refreshed,
             notRefreshed: `git hooks not refreshed, could not write ${failed.join(', ')}. They keep calling the agentdef they were written for.`,
             current: false,
+            gitignoreAdded,
         };
     }
-    return { refreshed, notRefreshed: '', current: true };
+    return { refreshed, notRefreshed: '', current: true, gitignoreAdded };
 }

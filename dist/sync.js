@@ -11,7 +11,7 @@ import { mirrorSkillDirs, mirrorAgentFiles } from './mirror.js';
 import { collectKnowledgeMetadata, knowledgeHookEnabled } from './knowledge.js';
 import { ensureSessionHook, KNOWLEDGE_HOOK } from './hooks.js';
 import { refreshHooks } from './init.js';
-import { LEGACY_AGENTDEF_DIR, SYNC_SKIPPED } from './paths.js';
+import { AGENTDEF_DIR, LEGACY_AGENTDEF_DIR, SYNC_SKIPPED } from './paths.js';
 // Where each tool reads its skills / sub-agents from.
 const SKILL_DIR = {
     'claude-code': '.claude/skills',
@@ -240,6 +240,8 @@ export function sync(dir, opts = {}) {
     const hooks = refreshHooks(agentDir, opts.runner);
     if (hooks.refreshed.length > 0)
         written.push(`git hooks refreshed: ${hooks.refreshed.join(', ')}`);
+    if (hooks.gitignoreAdded)
+        written.push(`added ${AGENTDEF_DIR}/ to .gitignore`);
     if (hooks.notRefreshed)
         warnings.push(`warning: ${hooks.notRefreshed}`);
     // A hook that had a sync to run and found no agentdef says so on stderr, which

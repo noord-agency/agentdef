@@ -140,6 +140,24 @@ describe('sync refreshes the hooks agentdef installed', () => {
     assert.equal(readFileSync(hook(root, 'post-commit'), 'utf-8'), before);
   });
 
+  // A refreshed hook records skipped syncs in .agentdef/. Repos initialized
+  // before init gitignored that dir have hooks and no entry, and a GUI client
+  // that commits every change would commit the record.
+  test('a refresh makes sure .agentdef/ is gitignored', () => {
+    const root = fixture();
+    const runner = installedRunner();
+    init(root, runner);
+    writeFileSync(join(root, '.gitignore'), 'node_modules/\n');
+    writeFileSync(hook(root, 'post-merge'), OLD_POST_MERGE);
+
+    const res = sync(root, { runner });
+
+    assert.ok(res.written.includes('added .agentdef/ to .gitignore'), res.written.join('\n'));
+    assert.equal(readFileSync(join(root, '.gitignore'), 'utf-8'), 'node_modules/\n.agentdef/\n');
+    write(root, { '.agentdef/sync-skipped': 'a skipped sync\n' });
+    assert.doesNotMatch(git(root, ['status', '--porcelain', '--untracked-files=all']), /\.agentdef/);
+  });
+
   // git may be running a hook while sync rewrites it (a terminal pull in
   // post-merge, a GUI commit's sync refreshing). Rewritten in place, that bash
   // could read half a script. Replaced by a rename, it reads the old file to

@@ -27,5 +27,6 @@ export interface HookRefresh {
     refreshed: HookName[];
     notRefreshed: string;
     current: boolean;
+    gitignoreAdded: boolean;
 }
 export declare function refreshHooks(dir: string, runner?: HookRunner): HookRefresh;
