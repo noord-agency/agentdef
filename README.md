@@ -81,7 +81,7 @@ resource: https://console.cloud.google.com/bigquery?t=orders
 ---
 ```
 
-Per the OKF spec, only `type` is required (a missing one fails `validate`/`sync` loudly); every other field is optional, unknown keys are tolerated, `type` values are yours to choose (dataset, metric, api, runbook, concept, ...). `index.md` and `log.md` are OKF-reserved names and skipped at every level. Folders nest freely; discovery is recursive. Rename the folder with `knowledge: { dir: ... }` in `agent.yaml` (then re-run `agentdef init` so the git hooks watch the new name).
+Per the OKF spec, only `type` is required (a missing one fails `validate`/`sync` loudly); every other field is optional, unknown keys are tolerated, `type` values are yours to choose (dataset, metric, api, runbook, concept, ...). `index.md` and `log.md` are OKF-reserved names and skipped at every level. Folders nest freely; discovery is recursive. Rename the folder with `knowledge: { dir: ... }` in `agent.yaml` (the next `agentdef sync` points the git hooks at the new name).
 
 Unlike skills, knowledge is **indexed, never mirrored**: each tool gets a compact index (type, title, description, pointer) and loads the full document on demand from its real path. Inherited docs (via `extends`) point into the regenerated `.agentdef/` cache; on a path collision the nearest definition wins, like skills. How the index reaches each tool:
 
@@ -117,7 +117,7 @@ Every command takes `--help` (and `--dir` to point at an agent directory other t
 
 ### The git hooks
 
-`agentdef init` writes four hooks into the repo's local `.git/hooks` (never committed, so every clone runs `init` once). Each one checks whether the change actually touched an agent source (`SOUL.md`, `RULES.md`, `DUTIES.md`, `agent.yaml`, `skills/`, `agents/`, `memory/`, the knowledge dir) and only then execs `agentdef sync`, so an ordinary code commit or pull costs nothing.
+`agentdef init` writes four hooks into the repo's local `.git/hooks` (never committed, so every clone runs `init` once). Each one checks whether the change actually touched an agent source (`SOUL.md`, `RULES.md`, `DUTIES.md`, `agent.yaml`, `skills/`, `agents/`, `memory/`, the knowledge dir) and only then runs `agentdef sync`, so an ordinary code commit or pull costs nothing.
 
 | Hook | Fires on | Range it diffs |
 |---|---|---|
@@ -130,7 +130,11 @@ Every command takes `--help` (and `--dir` to point at an agent directory other t
 
 A `core.hooksPath` set for the repo is unset by `init`, since it would send git to a different directory. One set globally or system-wide wins the same way but is not agentdef's to remove, so `init` reports it and leaves it alone.
 
-If `agentdef` is not on `PATH` the hooks print one line and exit 0, so a repo stays usable for someone who has not installed it.
+The hooks do not depend on `PATH`. A GUI git client (Obsidian Git, for one) runs hooks with the bare system `PATH`, `/usr/bin:/bin:/usr/sbin:/sbin` on macOS, where neither node nor agentdef lives. So `init` writes the absolute paths of the node binary and the agentdef CLI that ran it into each hook (with forward slashes on Windows, so Git Bash can run them). If those files are gone, say after uninstalling a node version or a Homebrew upgrade, the hook falls back to `agentdef` on `PATH`.
+
+If neither works, the hook still never blocks git. It prints why to stderr, appends a timestamped line to `.agentdef/sync-skipped` (gitignored with the rest of `.agentdef/`) and exits 0. The next `agentdef sync` shows that record as a warning and deletes it once it has caught up. A commit that touches no agent source records nothing.
+
+Every `agentdef sync` also keeps the hooks current. A hook that carries the `Installed by 'agentdef init'` line and differs from what the running agentdef would install (written by an older version, by another install, or for a since-renamed knowledge dir) is rewritten, and sync says so with `git hooks refreshed: ...`. Hooks without that line are never touched, and sync never adds a hook that is missing; that stays `init`'s job. Upgrading agentdef therefore needs no second `init`.
 
 ## Choosing your tools (`.agent-adapters`)
 
