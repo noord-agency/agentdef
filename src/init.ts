@@ -184,8 +184,11 @@ agentdef_sync() {
 }
 
 // What identifies a hook as agentdef's. refreshHooks rewrites only files that
-// carry it; every hook below has it on its second line.
-const HOOK_MARKER = /^# Installed by 'agentdef init'\./m;
+// start with it: every version since the first init writes the marker on the
+// second line, under this shebang. Matched anywhere, it would also claim a
+// hand-combined hook that pasted agentdef's block under its own lines, and the
+// rewrite would delete those lines.
+const HOOK_MARKER = /^#!\/usr\/bin\/env bash\n# Installed by 'agentdef init'\./;
 
 export const HOOK_NAMES = ['post-merge', 'post-checkout', 'post-commit', 'post-rewrite'] as const;
 export type HookName = (typeof HOOK_NAMES)[number];

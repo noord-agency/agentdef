@@ -97,6 +97,23 @@ describe('sync refreshes the hooks agentdef installed', () => {
     assert.equal(readFileSync(hook(root, 'pre-commit'), 'utf-8'), FOREIGN);
   });
 
+  // agentdef writes its marker on line 2, under its own shebang, in every
+  // version. A hand-combined hook that pasted agentdef's block under its own
+  // lines carries the marker further down; rewriting it would delete the
+  // user's part.
+  test('a hook with the marker further down is someone else\'s and is not touched', () => {
+    const root = fixture();
+    const runner = installedRunner();
+    init(root, runner);
+    const combined = `#!/usr/bin/env bash\n# team hook: lint first\nnpm run lint\n${OLD_POST_MERGE.split('\n').slice(1).join('\n')}`;
+    writeFileSync(hook(root, 'post-merge'), combined);
+
+    const res = sync(root, { runner });
+
+    assert.equal(res.written.filter((w) => REFRESHED.test(w)).length, 0);
+    assert.equal(readFileSync(hook(root, 'post-merge'), 'utf-8'), combined);
+  });
+
   test('hooks that already match are left alone and nothing is reported', () => {
     const root = fixture();
     const runner = installedRunner();
