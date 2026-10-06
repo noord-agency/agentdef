@@ -10,6 +10,7 @@ import { exportToCursorFiles } from './adapters/cursor.js';
 import { mirrorSkillDirs, mirrorAgentFiles } from './mirror.js';
 import { collectKnowledgeMetadata, knowledgeHookEnabled } from './knowledge.js';
 import { ensureSessionHook, KNOWLEDGE_HOOK } from './hooks.js';
+import { refreshHooks } from './init.js';
 import { LEGACY_AGENTDEF_DIR, SYNC_SKIPPED } from './paths.js';
 // Where each tool reads its skills / sub-agents from.
 const SKILL_DIR = {
@@ -232,6 +233,11 @@ export function sync(dir, opts = {}) {
                 written.push(`${agentTargetDir} (${n} agents)`);
         }
     }
+    // Hooks written by an older agentdef, or by another install of it, are
+    // brought up to date here, so an upgrade reaches them without a second init.
+    const refreshed = refreshHooks(agentDir);
+    if (refreshed.length > 0)
+        written.push(`git hooks refreshed: ${refreshed.join(', ')}`);
     // A hook that had a sync to run and found no agentdef says so on stderr, which
     // a GUI git client never shows, and in this file. Reaching this point means
     // the skipped work is done, so the record is reported once and cleared. A
@@ -242,7 +248,7 @@ export function sync(dir, opts = {}) {
         warnings.push([
             `warning: git hooks skipped ${log.length} sync(s) because they could not find agentdef (${SYNC_SKIPPED}):`,
             ...log.map((l) => `  ${l}`),
-            '  this sync has caught up.',
+            '  this sync has caught up, and the hooks now call the agentdef that ran it.',
         ].join('\n'));
         rmSync(skippedPath, { force: true });
     }

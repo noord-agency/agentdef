@@ -20,3 +20,4 @@ export interface InitResult {
     legacyRemoved: boolean;
 }
 export declare function init(dir: string, runner?: HookRunner): InitResult;
+export declare function refreshHooks(dir: string, runner?: HookRunner): HookName[];

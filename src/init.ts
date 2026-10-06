@@ -57,8 +57,8 @@ function removeLegacyCache(cwd: string): boolean {
 // Hooks run `agentdef sync`, but only when agent sources actually changed, so a
 // routine pull doesn't regenerate for nothing. They live in the repo's local
 // .git/hooks (never committed), so no repo needs an orchestration script. The
-// knowledge dir is rendered from agent.yaml at init time (a repo that renames it
-// re-runs `agentdef init` to refresh the hooks — they are idempotent).
+// knowledge dir is rendered from agent.yaml when the hooks are written; a repo
+// that renames it gets matching hooks from the next sync (see refreshHooks).
 function sourceGuard(knowledgeDir: string): string {
   return `for f in $changed; do
   case "$f" in
@@ -125,9 +125,10 @@ function shellQuote(value: string): string {
 // never block git. Only reached once the guard found a changed source, so an
 // ordinary commit stays silent and the file does not grow on every autosave.
 //
-// exec, as before, so sync's exit status is the hook's. exec cannot take a shell
-// function, which is why the guard calls agentdef_sync and the exec sits inside
-// it, never returning.
+// exec, so this shell is gone before sync starts: sync may rewrite this very
+// file (refreshHooks), and bash reads a script incrementally. exec cannot take a
+// shell function, which is why the guard calls agentdef_sync and the exec sits
+// inside it, never returning.
 function runnerBlock(runner: HookRunner): string {
   return `AGENTDEF_NODE=${shellQuote(runner.node)}
 AGENTDEF_CLI=${shellQuote(runner.cli)}
@@ -143,6 +144,10 @@ agentdef_sync() {
   exit 0
 }`;
 }
+
+// What identifies a hook as agentdef's. refreshHooks rewrites only files that
+// carry it; every hook below has it on its second line.
+const HOOK_MARKER = /^# Installed by 'agentdef init'\./m;
 
 export const HOOK_NAMES = ['post-merge', 'post-checkout', 'post-commit', 'post-rewrite'] as const;
 export type HookName = (typeof HOOK_NAMES)[number];
@@ -215,6 +220,24 @@ export interface InitResult {
   legacyRemoved: boolean;
 }
 
+// The knowledge dir as the hooks render it. The name is interpolated into a sh
+// case pattern, so restrict it to plain relative path characters — anything
+// else would corrupt the hooks silently.
+function hookKnowledgeDir(cwd: string): string {
+  const knowledgeDir = knowledgeDirName(cwd);
+  if (!/^[A-Za-z0-9._/-]+$/.test(knowledgeDir) || knowledgeDir.startsWith('/')) {
+    throw new Error(
+      `agent.yaml: knowledge.dir "${knowledgeDir}" must be a plain relative path (letters, digits, . _ - /)`,
+    );
+  }
+  return knowledgeDir;
+}
+
+function writeHook(path: string, body: string): void {
+  writeFileSync(path, body);
+  chmodSync(path, 0o755);
+}
+
 // Install agentdef's git hooks into the repo's local .git/hooks. If a custom
 // core.hooksPath is set (e.g. a committed .githooks), unset it so the local
 // hooks run, that committed dir can then be deleted. `runner` is the agentdef
@@ -225,14 +248,7 @@ export function init(dir: string, runner: HookRunner = hookRunner()): InitResult
   const hooksDir = join(gitDir, 'hooks');
   mkdirSync(hooksDir, { recursive: true });
 
-  // The name is interpolated into a sh case pattern, so restrict it to plain
-  // relative path characters — anything else would corrupt the hooks silently.
-  const knowledgeDir = knowledgeDirName(cwd);
-  if (!/^[A-Za-z0-9._/-]+$/.test(knowledgeDir) || knowledgeDir.startsWith('/')) {
-    throw new Error(
-      `agent.yaml: knowledge.dir "${knowledgeDir}" must be a plain relative path (letters, digits, . _ - /)`,
-    );
-  }
+  const knowledgeDir = hookKnowledgeDir(cwd);
 
   let unsetHooksPath = false;
   let current = '';
@@ -260,13 +276,63 @@ export function init(dir: string, runner: HookRunner = hookRunner()): InitResult
 
   const installed: string[] = [];
   for (const [name, body] of Object.entries(buildHooks(knowledgeDir, runner))) {
-    const path = join(hooksDir, name);
-    writeFileSync(path, body);
-    chmodSync(path, 0o755);
+    writeHook(join(hooksDir, name), body);
     installed.push(name);
   }
 
   const gitignoreAdded = ensureGitignore(cwd);
   const legacyRemoved = removeLegacyCache(cwd);
   return { hooksDir, installed, unsetHooksPath, externalHooksPath, gitignoreAdded, legacyRemoved };
+}
+
+// The hooks live in .git/hooks, outside the repo and outside the npm package,
+// so upgrading agentdef never reached them: every hook change so far needed a
+// second `agentdef init` on every machine, which is easy to forget and invisible
+// when forgotten. The baked paths add a third way to go stale, a node upgrade
+// that removes the old binary. sync runs constantly (mostly from these very
+// hooks), so it brings them up to date, with the same directory and knowledge
+// dir init uses. Returns the names of the hooks it rewrote.
+//
+// Only files carrying init's marker are agentdef's. Anything else in
+// .git/hooks (husky, lefthook, a hand-written hook) is left untouched, and a
+// hook that is missing stays missing: sync does not install what nobody ran
+// init for, which also keeps it out of CI checkouts. core.hooksPath is init's
+// business (it unsets the local one and reports any other), so sync does not
+// touch it and only looks where init writes.
+export function refreshHooks(dir: string, runner: HookRunner = hookRunner()): HookName[] {
+  const cwd = resolve(dir);
+  let gitDir: string;
+  try {
+    // stdio piped: outside a repo git prints "fatal: not a git repository",
+    // which is not news for a sync running in a plain directory.
+    gitDir = execFileSync('git', ['rev-parse', '--absolute-git-dir'], {
+      cwd,
+      encoding: 'utf-8',
+      env: gitSubprocessEnv(),
+      stdio: 'pipe',
+    }).trim();
+  } catch {
+    return []; // not a git checkout (a CI tarball, a plain directory), so no hooks
+  }
+  const hooksDir = join(gitDir, 'hooks');
+
+  const ours = new Map<HookName, string>();
+  for (const name of HOOK_NAMES) {
+    const path = join(hooksDir, name);
+    if (!existsSync(path)) continue;
+    const text = readFileSync(path, 'utf-8');
+    if (HOOK_MARKER.test(text)) ours.set(name, text);
+  }
+  // Checked only when there is something to refresh, so a repo without hooks
+  // (every CI run) never fails a sync over the knowledge dir name.
+  if (ours.size === 0) return [];
+
+  const wanted = buildHooks(hookKnowledgeDir(cwd), runner);
+  const refreshed: HookName[] = [];
+  for (const [name, text] of ours) {
+    if (text === wanted[name]) continue;
+    writeHook(join(hooksDir, name), wanted[name]);
+    refreshed.push(name);
+  }
+  return refreshed;
 }
