@@ -314,6 +314,23 @@ describe('hook behaviour with a GUI client PATH (real commits)', () => {
     assert.doesNotMatch(gitOut(root, ['status', '--porcelain']), /\.agentdef/);
   });
 
+  // git runs one hooks dir for all worktrees of a repo, the main one's. init
+  // in a linked worktree used to install into .git/worktrees/<name>/hooks,
+  // which git never runs, and said it had installed them.
+  test('init in a linked worktree installs the hooks git runs there', () => {
+    const root = fixture();
+    const wt = join(tempDir('agentdef-worktree-'), 'wt');
+    gitOut(root, ['worktree', 'add', '-q', wt]);
+    const { runner, calls } = fakeInstall();
+
+    const res = init(wt, runner);
+
+    assert.equal(realpathSync(res.hooksDir), realpathSync(join(root, '.git', 'hooks')));
+    const r = commitSkill(wt, GUI_PATH);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(calls, 'utf-8'), `${runner.cli}\nsync\n`, 'the commit in the worktree ran the hook');
+  });
+
   // The record means "a sync was needed and missed". Written on every commit it
   // would grow with each autosave of a GUI client and mean nothing.
   test('a commit that touches no agent source stays silent and records nothing', () => {

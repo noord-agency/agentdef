@@ -284,14 +284,22 @@ function writeHook(path, body) {
         throw err;
     }
 }
+// The hooks directory git runs when core.hooksPath is unset: hooks/ in the
+// common git dir, which every worktree of a repo shares. --absolute-git-dir is
+// that dir only in the main worktree; in a linked one (`git worktree add`) it
+// is .git/worktrees/<name>, whose hooks/ git never runs, so hooks installed or
+// refreshed there did nothing. The output of --git-common-dir can be relative
+// to cwd.
+function hooksDirOf(cwd, gitOut) {
+    return join(resolve(cwd, gitOut(['rev-parse', '--git-common-dir'])), 'hooks');
+}
 // Install agentdef's git hooks into the repo's local .git/hooks. If a custom
 // core.hooksPath is set (e.g. a committed .githooks), unset it so the local
 // hooks run, that committed dir can then be deleted. `runner` is the agentdef
 // the hooks will call; a parameter only so tests can point it elsewhere.
 export function init(dir, runner = hookRunner()) {
     const cwd = resolve(dir);
-    const gitDir = git(['rev-parse', '--absolute-git-dir'], cwd);
-    const hooksDir = join(gitDir, 'hooks');
+    const hooksDir = hooksDirOf(cwd, (args) => git(args, cwd));
     mkdirSync(hooksDir, { recursive: true });
     const knowledgeDir = hookKnowledgeDir(cwd);
     let unsetHooksPath = false;
@@ -363,10 +371,10 @@ export function refreshHooks(dir, runner = hookRunner()) {
     // stdio piped: outside a repo git prints "fatal: not a git repository",
     // which is not news for a sync running in a plain directory.
     const quietGit = (args) => execFileSync('git', args, { cwd, encoding: 'utf-8', env: gitSubprocessEnv(), stdio: 'pipe' }).trim();
-    let gitDir;
+    let hooksDir;
     let prefix;
     try {
-        gitDir = quietGit(['rev-parse', '--absolute-git-dir']);
+        hooksDir = hooksDirOf(cwd, quietGit);
         prefix = quietGit(['rev-parse', '--show-prefix']);
     }
     catch {
@@ -374,7 +382,6 @@ export function refreshHooks(dir, runner = hookRunner()) {
     }
     if (prefix !== '')
         return none; // a nested agent, not the one the hooks sync
-    const hooksDir = join(gitDir, 'hooks');
     const ours = new Map();
     for (const name of HOOK_NAMES) {
         const path = join(hooksDir, name);

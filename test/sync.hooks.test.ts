@@ -140,6 +140,25 @@ describe('sync refreshes the hooks agentdef installed', () => {
     assert.equal(readFileSync(hook(root, 'post-commit'), 'utf-8'), before);
   });
 
+  // All worktrees of a repo run the main one's hooks. A sync in a linked
+  // worktree used to look in .git/worktrees/<name>/hooks, found nothing, and
+  // left the hooks git actually runs stale.
+  test('a sync in a linked worktree refreshes the hooks git runs there', () => {
+    const root = fixture();
+    const runner = installedRunner();
+    init(root, runner);
+    writeFileSync(hook(root, 'post-merge'), OLD_POST_MERGE);
+    const base = mkdtempSync(join(tmpdir(), 'agentdef-worktree-'));
+    dirs.push(base);
+    git(root, ['worktree', 'add', '-q', join(base, 'wt')]);
+
+    const res = sync(join(base, 'wt'), { runner });
+
+    assert.deepEqual(res.written.filter((w) => REFRESHED.test(w)), ['git hooks refreshed: post-merge']);
+    assert.equal(readFileSync(hook(root, 'post-merge'), 'utf-8'), buildHooks('knowledge', runner)['post-merge']);
+    assert.ok(!existsSync(join(root, '.git', 'worktrees', 'wt', 'hooks')), 'nothing written where git does not look');
+  });
+
   // A refreshed hook records skipped syncs in .agentdef/. Repos initialized
   // before init gitignored that dir have hooks and no entry, and a GUI client
   // that commits every change would commit the record.

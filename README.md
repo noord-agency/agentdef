@@ -117,7 +117,7 @@ Every command takes `--help` (and `--dir` to point at an agent directory other t
 
 ### The git hooks
 
-`agentdef init` writes four hooks into the repo's local `.git/hooks` (never committed, so every clone runs `init` once). Each one checks whether the change actually touched an agent source (`SOUL.md`, `RULES.md`, `DUTIES.md`, `agent.yaml`, `skills/`, `agents/`, `memory/`, the knowledge dir) and only then runs `agentdef sync`, so an ordinary code commit or pull costs nothing.
+`agentdef init` writes four hooks into the repo's local `.git/hooks` (never committed, so every clone runs `init` once). Run in a linked worktree (`git worktree add`), `init` and `sync` use the main checkout's `.git/hooks`, which git runs for every worktree of the repo. Each one checks whether the change actually touched an agent source (`SOUL.md`, `RULES.md`, `DUTIES.md`, `agent.yaml`, `skills/`, `agents/`, `memory/`, the knowledge dir) and only then runs `agentdef sync`, so an ordinary code commit or pull costs nothing.
 
 | Hook | Fires on | Range it diffs |
 |---|---|---|
