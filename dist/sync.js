@@ -10,7 +10,7 @@ import { exportToCursorFiles } from './adapters/cursor.js';
 import { mirrorSkillDirs, mirrorAgentFiles } from './mirror.js';
 import { collectKnowledgeMetadata, knowledgeHookEnabled } from './knowledge.js';
 import { ensureSessionHook, KNOWLEDGE_HOOK } from './hooks.js';
-import { LEGACY_AGENTDEF_DIR } from './paths.js';
+import { LEGACY_AGENTDEF_DIR, SYNC_SKIPPED } from './paths.js';
 // Where each tool reads its skills / sub-agents from.
 const SKILL_DIR = {
     'claude-code': '.claude/skills',
@@ -231,6 +231,20 @@ export function sync(dir, opts = {}) {
             if (n > 0)
                 written.push(`${agentTargetDir} (${n} agents)`);
         }
+    }
+    // A hook that had a sync to run and found no agentdef says so on stderr, which
+    // a GUI git client never shows, and in this file. Reaching this point means
+    // the skipped work is done, so the record is reported once and cleared. A
+    // sync that threw above keeps it: nothing has caught up yet.
+    const skippedPath = join(agentDir, SYNC_SKIPPED);
+    if (existsSync(skippedPath)) {
+        const log = readFileSync(skippedPath, 'utf-8').split('\n').filter((l) => l.trim());
+        warnings.push([
+            `warning: git hooks skipped ${log.length} sync(s) because they could not find agentdef (${SYNC_SKIPPED}):`,
+            ...log.map((l) => `  ${l}`),
+            '  this sync has caught up.',
+        ].join('\n'));
+        rmSync(skippedPath, { force: true });
     }
     return { adapters, written, warnings };
 }
