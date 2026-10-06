@@ -252,9 +252,9 @@ export function sync(dir, opts = {}) {
         warnings.push([
             `warning: git hooks skipped ${log.length} sync(s) because they could not find agentdef (${SYNC_SKIPPED}):`,
             ...log.map((l) => `  ${l}`),
-            hooks.notRefreshed
-                ? '  this sync has caught up.'
-                : '  this sync has caught up, and the hooks now call the agentdef that ran it.',
+            hooks.current
+                ? '  this sync has caught up, and the hooks now call the agentdef that ran it.'
+                : '  this sync has caught up.',
         ].join('\n'));
         rmSync(skippedPath, { force: true });
     }

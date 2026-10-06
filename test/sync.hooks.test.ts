@@ -260,6 +260,42 @@ describe('sync and the record of skipped hook syncs', () => {
     '2026-10-02T09:30:00Z post-merge: agentdef not found (PATH=/usr/bin:/bin:/usr/sbin:/sbin)',
   ];
 
+  // The closing line tells the user whether the next GUI commit will reach
+  // agentdef. It may only say so when sync actually found agentdef's hooks and
+  // left them calling itself; with no hooks, or from a nested agent, nothing
+  // was checked.
+  test('claims the hooks call this agentdef only when it checked them', () => {
+    const caughtUp = (res: { warnings: string[] }) =>
+      res.warnings.find((w) => w.includes('could not find agentdef'))?.split('\n').at(-1);
+    const NOW_CALL = '  this sync has caught up, and the hooks now call the agentdef that ran it.';
+    const ONLY = '  this sync has caught up.';
+    const runner = installedRunner();
+
+    const checked = fixture();
+    init(checked, runner);
+    write(checked, { '.agentdef/sync-skipped': `${RECORD[0]}\n` });
+    assert.equal(caughtUp(sync(checked, { runner })), NOW_CALL);
+
+    const noHooks = fixture();
+    write(noHooks, { '.agentdef/sync-skipped': `${RECORD[0]}\n` });
+    assert.equal(caughtUp(sync(noHooks, { runner })), ONLY);
+
+    const nested = fixture();
+    write(nested, {
+      'sub/agent.yaml': 'name: sub\ndescription: s\n',
+      'sub/SOUL.md': '# sub\n',
+      'sub/.agent-adapters': 'claude-code\n',
+      'sub/.agentdef/sync-skipped': `${RECORD[0]}\n`,
+    });
+    init(nested, runner);
+    assert.equal(caughtUp(sync(join(nested, 'sub'), { runner })), ONLY);
+
+    const stale = fixture();
+    init(stale, runner);
+    write(stale, { '.agentdef/sync-skipped': `${RECORD[0]}\n` });
+    assert.equal(caughtUp(sync(stale, { runner: GONE })), ONLY);
+  });
+
   test('is reported with its content and cleared once sync has caught up', () => {
     const root = fixture();
     write(root, { '.agentdef/sync-skipped': `${RECORD.join('\n')}\n` });

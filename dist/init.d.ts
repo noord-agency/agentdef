@@ -26,5 +26,6 @@ export declare function init(dir: string, runner?: HookRunner): InitResult;
 export interface HookRefresh {
     refreshed: HookName[];
     notRefreshed: string;
+    current: boolean;
 }
 export declare function refreshHooks(dir: string, runner?: HookRunner): HookRefresh;

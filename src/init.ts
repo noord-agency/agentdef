@@ -384,6 +384,10 @@ export interface HookRefresh {
   // left that way, for sync to print as a warning. Empty when nothing stood in
   // the way.
   notRefreshed: string;
+  // Whether agentdef's hooks were found and now match this agentdef. False
+  // when there were none to check (no hooks, not a git checkout, a nested
+  // agent) as much as when some were left stale.
+  current: boolean;
 }
 
 // The hooks live in .git/hooks, outside the repo and outside the npm package,
@@ -414,7 +418,7 @@ export interface HookRefresh {
 // record until an installed agentdef synced again. Such hooks are left as they
 // are, and notRefreshed says why.
 export function refreshHooks(dir: string, runner: HookRunner = hookRunner()): HookRefresh {
-  const none: HookRefresh = { refreshed: [], notRefreshed: '' };
+  const none: HookRefresh = { refreshed: [], notRefreshed: '', current: false };
   const cwd = resolve(dir);
   // stdio piped: outside a repo git prints "fatal: not a git repository",
   // which is not news for a sync running in a plain directory.
@@ -453,6 +457,7 @@ export function refreshHooks(dir: string, runner: HookRunner = hookRunner()): Ho
     return {
       refreshed: [],
       notRefreshed: `git hooks not refreshed: ${problem}, so they keep watching the knowledge dir they were written for.`,
+      current: false,
     };
   }
 
@@ -468,15 +473,16 @@ export function refreshHooks(dir: string, runner: HookRunner = hookRunner()): Ho
     wanted.set(name, buildHooks(knowledgeDir, { node, cli: runner.cli })[name]);
   }
   const stale = [...ours].filter(([name, text]) => text !== wanted.get(name)).map(([name]) => name);
-  if (stale.length === 0) return none;
+  if (stale.length === 0) return { refreshed: [], notRefreshed: '', current: true };
 
   const missing = missingRunnerPaths(runner);
   if (missing.length > 0) {
     return {
       refreshed: [],
       notRefreshed: `git hooks not refreshed (${stale.join(', ')}): ${missing.join(' and ')} ${missing.length === 1 ? 'does' : 'do'} not exist, so this agentdef is not one a hook can run (running from source?). The next sync from an installed agentdef refreshes them.`,
+      current: false,
     };
   }
   for (const name of stale) writeHook(join(hooksDir, name), wanted.get(name) as string);
-  return { refreshed: stale, notRefreshed: '' };
+  return { refreshed: stale, notRefreshed: '', current: true };
 }
