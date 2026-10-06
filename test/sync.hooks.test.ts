@@ -373,7 +373,8 @@ describe('sync and the record of skipped hook syncs', () => {
     assert.ok(warning, 'the skip must surface as a warning');
     assert.match(warning, /skipped 2 sync\(s\)/);
     for (const line of RECORD) assert.ok(warning.includes(line), line);
-    assert.ok(!existsSync(join(root, '.agentdef', 'sync-skipped')));
+    // Read from a renamed copy, which goes too.
+    assert.deepEqual(readdirSync(join(root, '.agentdef')).filter((f) => f.startsWith('sync-skipped')), []);
     assert.equal(sync(root).warnings.some((w) => w.includes('could not find agentdef')), false, 'reported once');
   });
 

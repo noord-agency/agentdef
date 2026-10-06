@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, renameSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { install } from './install.js';
@@ -286,9 +286,22 @@ export function sync(
   // a GUI git client never shows, and in this file. Reaching this point means
   // the skipped work is done, so the record is reported once and cleared. A
   // sync that threw above keeps it: nothing has caught up yet.
+  //
+  // Renamed before it is read. Read first and deleted after, a line a hook
+  // appended in between (a GUI commit during a terminal sync) went with the
+  // file unreported. After the rename such a hook starts a new record, which
+  // the next sync reports.
   const skippedPath = join(agentDir, SYNC_SKIPPED);
-  if (existsSync(skippedPath)) {
-    const log = readFileSync(skippedPath, 'utf-8').split('\n').filter((l) => l.trim());
+  const takenPath = `${skippedPath}.reading-${process.pid}`;
+  let taken = true;
+  try {
+    renameSync(skippedPath, takenPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    taken = false; // no record, the usual case
+  }
+  if (taken) {
+    const log = readFileSync(takenPath, 'utf-8').split('\n').filter((l) => l.trim());
     warnings.push(
       [
         `warning: git hooks skipped ${log.length} sync(s) because they could not find agentdef (${SYNC_SKIPPED}):`,
@@ -298,7 +311,7 @@ export function sync(
           : '  this sync has caught up.',
       ].join('\n'),
     );
-    rmSync(skippedPath, { force: true });
+    rmSync(takenPath, { force: true });
   }
   return { adapters, written, warnings };
 }
