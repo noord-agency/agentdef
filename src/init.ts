@@ -264,16 +264,20 @@ export interface InitResult {
   legacyRemoved: boolean;
 }
 
-// The knowledge dir as the hooks render it. The name is interpolated into a sh
-// case pattern, so restrict it to plain relative path characters — anything
-// else would corrupt the hooks silently.
+// Why a knowledge dir name cannot go into the hooks, or '' when it can. The
+// name is interpolated into a sh case pattern, so it is restricted to plain
+// relative path characters; anything else would corrupt the hooks silently.
+function hookKnowledgeDirProblem(knowledgeDir: string): string {
+  if (/^[A-Za-z0-9._/-]+$/.test(knowledgeDir) && !knowledgeDir.startsWith('/')) return '';
+  return `agent.yaml: knowledge.dir "${knowledgeDir}" must be a plain relative path (letters, digits, . _ - /)`;
+}
+
+// The knowledge dir as the hooks render it. init refuses to install hooks for
+// a name they cannot carry.
 function hookKnowledgeDir(cwd: string): string {
   const knowledgeDir = knowledgeDirName(cwd);
-  if (!/^[A-Za-z0-9._/-]+$/.test(knowledgeDir) || knowledgeDir.startsWith('/')) {
-    throw new Error(
-      `agent.yaml: knowledge.dir "${knowledgeDir}" must be a plain relative path (letters, digits, . _ - /)`,
-    );
-  }
+  const problem = hookKnowledgeDirProblem(knowledgeDir);
+  if (problem) throw new Error(problem);
   return knowledgeDir;
 }
 
@@ -394,10 +398,24 @@ export function refreshHooks(dir: string, runner: HookRunner = hookRunner()): Ho
     if (HOOK_MARKER.test(text)) ours.set(name, text);
   }
   // Checked only when there is something to refresh, so a repo without hooks
-  // (every CI run) never fails a sync over the knowledge dir name.
+  // (every CI run) never hears about the knowledge dir name.
   if (ours.size === 0) return none;
 
-  const wanted = buildHooks(hookKnowledgeDir(cwd), runner);
+  // A name init would refuse is a warning here, not a throw. sync has written
+  // every output by now, so failing would report a sync that did its job as
+  // failed, become the exit status of `git checkout` through post-checkout,
+  // and keep a skip record whose work is done. What cannot follow is the hooks,
+  // and that is said on every sync until the name is fixed.
+  const knowledgeDir = knowledgeDirName(cwd);
+  const problem = hookKnowledgeDirProblem(knowledgeDir);
+  if (problem) {
+    return {
+      refreshed: [],
+      notRefreshed: `git hooks not refreshed: ${problem}, so they keep watching the knowledge dir they were written for.`,
+    };
+  }
+
+  const wanted = buildHooks(knowledgeDir, runner);
   const stale = [...ours].filter(([name, text]) => text !== wanted[name]).map(([name]) => name);
   if (stale.length === 0) return none;
 

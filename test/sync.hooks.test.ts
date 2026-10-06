@@ -252,4 +252,30 @@ describe('sync and the record of skipped hook syncs', () => {
 
     assert.equal(readFileSync(join(root, '.agentdef', 'sync-skipped'), 'utf-8'), `${RECORD[0]}\n`);
   });
+
+  // A knowledge dir init would refuse (it is pasted into a case pattern) used
+  // to throw after every output was written: exit 1 for a sync that did its
+  // job, the exit status of `git checkout` through post-checkout, and a skip
+  // record kept although the skipped work was done. The hooks are what cannot
+  // follow, so that is what gets reported, on every sync until it is fixed.
+  test('a knowledge dir the hooks cannot watch is a warning, the sync itself completes', () => {
+    const root = fixture();
+    const runner = installedRunner();
+    init(root, runner);
+    const before = HOOK_NAMES.map((name) => readFileSync(hook(root, name), 'utf-8'));
+    write(root, {
+      'agent.yaml': 'name: t\ndescription: t\nknowledge:\n  dir: my notes\n',
+      '.agentdef/sync-skipped': `${RECORD[0]}\n`,
+    });
+
+    const res = sync(root, { runner });
+
+    assert.ok(res.written.includes('CLAUDE.md'), 'the outputs were written');
+    const warning = res.warnings.find((w) => NOT_REFRESHED.test(w));
+    assert.ok(warning, 'the hooks falling behind must be reported');
+    assert.match(warning, /knowledge\.dir "my notes" must be a plain relative path/);
+    assert.deepEqual(HOOK_NAMES.map((name) => readFileSync(hook(root, name), 'utf-8')), before);
+    assert.ok(!existsSync(join(root, '.agentdef', 'sync-skipped')), 'the skipped sync has caught up');
+    assert.throws(() => init(root, runner), /knowledge\.dir "my notes"/, 'init still refuses it');
+  });
 });
