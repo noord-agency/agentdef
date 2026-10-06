@@ -109,6 +109,29 @@ describe('sync refreshes the hooks agentdef installed', () => {
     }
   });
 
+  // The hooks run `agentdef sync` in the top level of the work tree, so they
+  // belong to the agent there. A nested agent synced with --dir brings its own
+  // knowledge dir: refreshing from it made the root hooks watch that one
+  // instead, edits to the root knowledge dir stopped triggering a sync, and the
+  // next plain sync flipped the hooks back.
+  test('syncing a nested agent leaves the repo hooks to the top-level agent', () => {
+    const root = fixture();
+    write(root, {
+      'sub/agent.yaml': 'name: sub\ndescription: s\nknowledge:\n  dir: notes\n',
+      'sub/SOUL.md': '# sub\n',
+      'sub/.agent-adapters': 'claude-code\n',
+    });
+    init(root);
+
+    const nested = sync(join(root, 'sub'));
+
+    assert.equal(nested.written.filter((w) => REFRESHED.test(w)).length, 0);
+    for (const name of ['post-merge', 'post-checkout', 'post-commit', 'post-rewrite']) {
+      assert.match(readFileSync(hook(root, name), 'utf-8'), /\|knowledge\/\*\) agentdef_sync ;;/, name);
+    }
+    assert.equal(sync(root).written.filter((w) => REFRESHED.test(w)).length, 0, 'nothing for the next sync to undo');
+  });
+
   // sync runs in CI checkouts and in repos nobody ran init in. Installing hooks
   // there is init's decision, not a side effect of generating files.
   test('a hook that is not there is not installed', () => {

@@ -247,22 +247,29 @@ export function init(dir, runner = hookRunner()) {
 // init for, which also keeps it out of CI checkouts. core.hooksPath is init's
 // business (it unsets the local one and reports any other), so sync does not
 // touch it and only looks where init writes.
+//
+// Only the top-level agent refreshes them. A hook runs `agentdef sync` in the
+// top level of the work tree and diffs paths relative to it, so that agent's
+// knowledge dir is the one the hooks watch. A nested agent synced with
+// `--dir sub` shares the repo's hooks without being what they sync; refreshing
+// from it pointed them at its knowledge dir, and the next top-level sync
+// flipped them back.
 export function refreshHooks(dir, runner = hookRunner()) {
     const cwd = resolve(dir);
+    // stdio piped: outside a repo git prints "fatal: not a git repository",
+    // which is not news for a sync running in a plain directory.
+    const quietGit = (args) => execFileSync('git', args, { cwd, encoding: 'utf-8', env: gitSubprocessEnv(), stdio: 'pipe' }).trim();
     let gitDir;
+    let prefix;
     try {
-        // stdio piped: outside a repo git prints "fatal: not a git repository",
-        // which is not news for a sync running in a plain directory.
-        gitDir = execFileSync('git', ['rev-parse', '--absolute-git-dir'], {
-            cwd,
-            encoding: 'utf-8',
-            env: gitSubprocessEnv(),
-            stdio: 'pipe',
-        }).trim();
+        gitDir = quietGit(['rev-parse', '--absolute-git-dir']);
+        prefix = quietGit(['rev-parse', '--show-prefix']);
     }
     catch {
         return []; // not a git checkout (a CI tarball, a plain directory), so no hooks
     }
+    if (prefix !== '')
+        return []; // a nested agent, not the one the hooks sync
     const hooksDir = join(gitDir, 'hooks');
     const ours = new Map();
     for (const name of HOOK_NAMES) {
