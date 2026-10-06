@@ -6,6 +6,7 @@ export interface HookRunnerSource {
     platform?: NodeJS.Platform;
     execPath?: string;
     cliPath?: string;
+    pathEnv?: string;
 }
 export declare function missingRunnerPaths(runner: HookRunner): string[];
 export declare function hookRunner(source?: HookRunnerSource): HookRunner;

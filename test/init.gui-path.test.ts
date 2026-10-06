@@ -9,9 +9,9 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, chmodSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, chmodSync, existsSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname, isAbsolute } from 'node:path';
+import { join, dirname, isAbsolute, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { init, buildHooks, hookRunner, HOOK_NAMES, type HookRunner } from '../src/init.js';
 
@@ -160,15 +160,55 @@ describe('hook text: which agentdef a hook calls', () => {
     assert.equal(hookRunner({ platform: 'linux', execPath: '/opt/odd\\name/node' }).node, '/opt/odd\\name/node');
   });
 
-  // The defaults are the point: the node that is running, and the cli.js next
-  // to the init module (dist/cli.js in the package), not process.argv[1], which
-  // under a test runner is a test file.
+  // The defaults are the point: the node that is running (possibly by its PATH
+  // name, see below), and the cli.js next to the init module (dist/cli.js in
+  // the package), not process.argv[1], which under a test runner is a test file.
   test('by default it is the running node and the cli.js beside the init module', () => {
     const runner = hookRunner({ platform: 'linux' });
-    assert.equal(runner.node, process.execPath);
+    assert.ok(isAbsolute(runner.node));
+    assert.equal(realpathSync(runner.node), realpathSync(process.execPath));
     assert.ok(isAbsolute(runner.cli));
     const initModule = fileURLToPath(import.meta.resolve('../src/init.ts'));
     assert.equal(runner.cli, join(dirname(initModule), 'cli.js'));
+  });
+
+  // Homebrew: process.execPath is the Cellar binary, which the cleanup after
+  // `brew upgrade node` deletes, while /opt/homebrew/bin/node is a symlink
+  // every upgrade repoints. Baking the Cellar path made every GUI hook skip
+  // after each node upgrade until someone synced from a terminal.
+  test('a node on PATH that links to the running node is baked by that name', () => {
+    const prefix = tempDir('agentdef-brew-');
+    const cellar = join(prefix, 'Cellar', 'node', '25.6.1', 'bin', 'node');
+    const bin = join(prefix, 'bin');
+    mkdirSync(dirname(cellar), { recursive: true });
+    mkdirSync(bin);
+    writeFileSync(cellar, '');
+    symlinkSync(cellar, join(bin, 'node'));
+    const noNode = tempDir('agentdef-no-node-');
+
+    const runner = hookRunner({
+      platform: 'darwin',
+      execPath: realpathSync(cellar),
+      cliPath: '/opt/homebrew/lib/node_modules/@noord-agency/agentdef/dist/cli.js',
+      pathEnv: ['relative/bin', noNode, bin].join(delimiter),
+    });
+
+    assert.equal(runner.node, join(bin, 'node'));
+  });
+
+  // volta and mise put a shim called node on PATH. It is not the running node,
+  // and the hook must not depend on it.
+  test('a node on PATH that resolves to another binary is passed over', () => {
+    const prefix = tempDir('agentdef-shim-');
+    const real = join(prefix, 'versions', '22', 'bin', 'node');
+    mkdirSync(dirname(real), { recursive: true });
+    mkdirSync(join(prefix, 'shims'));
+    writeFileSync(real, '');
+    writeFileSync(join(prefix, 'shims', 'shim'), '');
+    symlinkSync(join(prefix, 'shims', 'shim'), join(prefix, 'shims', 'node'));
+    const execPath = realpathSync(real);
+
+    assert.equal(hookRunner({ platform: 'darwin', execPath, cliPath: '/x/cli.js', pathEnv: join(prefix, 'shims') }).node, execPath);
   });
 });
 

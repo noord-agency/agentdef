@@ -1,5 +1,5 @@
 import { writeFileSync, readFileSync, existsSync, chmodSync, mkdirSync, rmSync, realpathSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, basename, delimiter, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { AGENTDEF_DIR, LEGACY_AGENTDEF_DIR, SYNC_SKIPPED } from './paths.js';
@@ -85,6 +85,8 @@ export interface HookRunnerSource {
   platform?: NodeJS.Platform;
   execPath?: string;
   cliPath?: string;
+  // The PATH searched for a name of execPath that survives a node upgrade.
+  pathEnv?: string;
 }
 
 // The CLI entry of this install: dist/cli.js, next to this module. Not
@@ -106,6 +108,34 @@ export function missingRunnerPaths(runner: HookRunner): string[] {
   return [runner.node, runner.cli].filter((path) => !existsSync(path));
 }
 
+// process.execPath is the resolved binary. For Homebrew that is the versioned
+// Cellar path (/opt/homebrew/Cellar/node/25.6.1/bin/node), which the cleanup
+// after the next `brew upgrade node` deletes, while /opt/homebrew/bin/node on
+// PATH is a symlink every upgrade repoints. So when a node on PATH resolves to
+// the running binary, the hook gets that name: the same binary today, and still
+// there after an upgrade. A shim that resolves to something else (volta, mise)
+// is not the running node and is passed over. An nvm PATH entry is the
+// versioned binary itself, so nothing changes there. Relative PATH entries are
+// skipped, a hook runs in another directory.
+function stableNodePath(execPath: string, pathEnv: string): string {
+  let running: string;
+  try {
+    running = realpathSync(execPath);
+  } catch {
+    return execPath; // not on disk (an injected path), nothing to compare with
+  }
+  for (const dir of pathEnv.split(delimiter)) {
+    if (!isAbsolute(dir)) continue;
+    const candidate = join(dir, basename(execPath));
+    try {
+      if (realpathSync(candidate) === running) return candidate;
+    } catch {
+      // no such file in this PATH entry
+    }
+  }
+  return execPath;
+}
+
 // Platform and paths are parameters so the Windows rendering can be tested on
 // any OS. Git for Windows runs hooks in Git Bash, which executes
 // C:/Program Files/nodejs/node.exe as written but not reliably the backslash
@@ -115,7 +145,7 @@ export function hookRunner(source: HookRunnerSource = {}): HookRunner {
   const platform = source.platform ?? process.platform;
   const forShell = (path: string) => (platform === 'win32' ? path.replace(/\\/g, '/') : path);
   return {
-    node: forShell(source.execPath ?? process.execPath),
+    node: forShell(stableNodePath(source.execPath ?? process.execPath, source.pathEnv ?? process.env.PATH ?? '')),
     cli: forShell(source.cliPath ?? ownCliPath()),
   };
 }
