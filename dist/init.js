@@ -1,5 +1,5 @@
 import { writeFileSync, readFileSync, existsSync, chmodSync, mkdirSync, rmSync, realpathSync } from 'node:fs';
-import { join, resolve, basename, delimiter, isAbsolute } from 'node:path';
+import { join, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { AGENTDEF_DIR, LEGACY_AGENTDEF_DIR, SYNC_SKIPPED } from './paths.js';
@@ -81,21 +81,22 @@ export function missingRunnerPaths(runner) {
 }
 // process.execPath is the resolved binary. For Homebrew that is the versioned
 // Cellar path (/opt/homebrew/Cellar/node/25.6.1/bin/node), which the cleanup
-// after the next `brew upgrade node` deletes, while /opt/homebrew/bin/node on
-// PATH is a symlink every upgrade repoints. So when a node on PATH resolves to
-// the running binary, the hook gets that name: the same binary today, and still
-// there after an upgrade. A shim that resolves to something else (volta, mise)
-// is not the running node and is passed over. An nvm PATH entry is the
-// versioned binary itself, so nothing changes there. Relative PATH entries are
-// skipped, a hook runs in another directory.
+// after the next `brew upgrade node` deletes. Homebrew keeps
+// <prefix>/opt/<formula> for every installed formula, keg-only ones like
+// node@22 included, and repoints it on each upgrade. So a node in a Cellar gets
+// its opt name when that resolves to the running binary: the same binary
+// today, and still there after an upgrade. Every other node is baked as the
+// binary it is. nvm, fnm, volta and mise run a versioned binary that stays
+// until that version is uninstalled. A symlink on PATH is no better: fnm puts a
+// per-shell directory on PATH that is gone with the shell, and a shim (volta,
+// mise) is not the running node at all.
 //
 // The node a hook started this sync with comes first, when it is the running
 // binary. The PATH a sync sees is whatever started it, and a hook run by a GUI
-// client has the bare system PATH, without the symlink a terminal has. Looked up
-// there alone, the name changed with every switch between GUI and terminal, and
-// each sync rewrote all four hooks to its own, the GUI one being the Cellar path
-// this lookup exists to avoid.
-function stableNodePath(execPath, pathEnv, hookNode) {
+// client has the bare system PATH. A choice that depends on PATH differs
+// between GUI and terminal runs, and each sync rewrote all four hooks to its
+// own.
+function stableNodePath(execPath, hookNode) {
     let running;
     try {
         running = realpathSync(execPath);
@@ -105,12 +106,12 @@ function stableNodePath(execPath, pathEnv, hookNode) {
     }
     if (hookNode && isAbsolute(hookNode) && resolvesTo(hookNode, running))
         return hookNode;
-    for (const dir of pathEnv.split(delimiter)) {
-        if (!isAbsolute(dir))
-            continue;
-        const candidate = join(dir, basename(execPath));
-        if (resolvesTo(candidate, running))
-            return candidate;
+    const cellar = /^(.+)\/Cellar\/([^/]+)\/[^/]+\/bin\/([^/]+)$/.exec(running);
+    if (cellar) {
+        const [, prefix, formula, name] = cellar;
+        const opt = `${prefix}/opt/${formula}/bin/${name}`;
+        if (resolvesTo(opt, running))
+            return opt;
     }
     return execPath;
 }
@@ -142,7 +143,7 @@ export function hookRunner(source = {}) {
     const platform = source.platform ?? process.platform;
     const forShell = (path) => (platform === 'win32' ? path.replace(/\\/g, '/') : path);
     return {
-        node: forShell(stableNodePath(source.execPath ?? process.execPath, source.pathEnv ?? process.env.PATH ?? '', 'hookNode' in source ? source.hookNode : process.env.AGENTDEF_HOOK_NODE)),
+        node: forShell(stableNodePath(source.execPath ?? process.execPath, 'hookNode' in source ? source.hookNode : process.env.AGENTDEF_HOOK_NODE)),
         cli: forShell(source.cliPath ?? ownCliPath()),
     };
 }

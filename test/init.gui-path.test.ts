@@ -160,7 +160,7 @@ describe('hook text: which agentdef a hook calls', () => {
     assert.equal(hookRunner({ platform: 'linux', execPath: '/opt/odd\\name/node' }).node, '/opt/odd\\name/node');
   });
 
-  // The defaults are the point: the node that is running (possibly by its PATH
+  // The defaults are the point: the node that is running (possibly by another
   // name, see below), and the cli.js next to the init module (dist/cli.js in
   // the package), not process.argv[1], which under a test runner is a test file.
   test('by default it is the running node and the cli.js beside the init module', () => {
@@ -172,60 +172,76 @@ describe('hook text: which agentdef a hook calls', () => {
     assert.equal(runner.cli, join(dirname(initModule), 'cli.js'));
   });
 
+  // A Homebrew prefix with one node formula installed: the versioned keg in
+  // Cellar, and opt/<formula> linking to it the way brew does.
+  function brew(formula: string, version: string): { prefix: string; cellarNode: string } {
+    const prefix = realpathSync(tempDir('agentdef-brew-'));
+    const cellarNode = join(prefix, 'Cellar', formula, version, 'bin', 'node');
+    mkdirSync(dirname(cellarNode), { recursive: true });
+    writeFileSync(cellarNode, '');
+    mkdirSync(join(prefix, 'opt'));
+    symlinkSync(join('..', 'Cellar', formula, version), join(prefix, 'opt', formula));
+    return { prefix, cellarNode };
+  }
+
   // Homebrew: process.execPath is the Cellar binary, which the cleanup after
-  // `brew upgrade node` deletes, while /opt/homebrew/bin/node is a symlink
-  // every upgrade repoints. Baking the Cellar path made every GUI hook skip
-  // after each node upgrade until someone synced from a terminal.
-  test('a node on PATH that links to the running node is baked by that name', () => {
-    const prefix = tempDir('agentdef-brew-');
-    const cellar = join(prefix, 'Cellar', 'node', '25.6.1', 'bin', 'node');
-    const bin = join(prefix, 'bin');
-    mkdirSync(dirname(cellar), { recursive: true });
-    mkdirSync(bin);
-    writeFileSync(cellar, '');
-    symlinkSync(cellar, join(bin, 'node'));
-    const noNode = tempDir('agentdef-no-node-');
-
-    const runner = hookRunner({
-      platform: 'darwin',
-      execPath: realpathSync(cellar),
-      cliPath: '/opt/homebrew/lib/node_modules/@noord-agency/agentdef/dist/cli.js',
-      pathEnv: ['relative/bin', noNode, bin].join(delimiter),
-    });
-
-    assert.equal(runner.node, join(bin, 'node'));
+  // `brew upgrade node` deletes, while opt/<formula> is repointed by every
+  // upgrade. Baking the Cellar path made every GUI hook skip after each node
+  // upgrade until someone synced from a terminal.
+  test('a Homebrew Cellar node is baked by its opt name, keg-only formulae too', () => {
+    for (const formula of ['node', 'node@22']) {
+      const { prefix, cellarNode } = brew(formula, '22.11.0');
+      const runner = hookRunner({ platform: 'darwin', execPath: cellarNode, cliPath: '/x/cli.js', hookNode: undefined });
+      assert.equal(runner.node, join(prefix, 'opt', formula, 'bin', 'node'), formula);
+    }
   });
 
-  // volta and mise put a shim called node on PATH. It is not the running node,
-  // and the hook must not depend on it.
-  test('a node on PATH that resolves to another binary is passed over', () => {
-    const prefix = tempDir('agentdef-shim-');
-    const real = join(prefix, 'versions', '22', 'bin', 'node');
-    mkdirSync(dirname(real), { recursive: true });
-    mkdirSync(join(prefix, 'shims'));
-    writeFileSync(real, '');
-    writeFileSync(join(prefix, 'shims', 'shim'), '');
-    symlinkSync(join(prefix, 'shims', 'shim'), join(prefix, 'shims', 'node'));
-    const execPath = realpathSync(real);
+  // opt already points at the upgraded keg while the old one still runs (an
+  // agentdef started before `brew upgrade` finished). The opt name would bake
+  // a different node than the one running.
+  test('a Cellar node whose opt link points elsewhere keeps its own path', () => {
+    const { prefix, cellarNode } = brew('node', '25.6.1');
+    const older = join(prefix, 'Cellar', 'node', '24.0.0', 'bin', 'node');
+    mkdirSync(dirname(older), { recursive: true });
+    writeFileSync(older, '');
 
-    assert.equal(hookRunner({ platform: 'darwin', execPath, cliPath: '/x/cli.js', pathEnv: join(prefix, 'shims') }).node, execPath);
+    assert.equal(hookRunner({ platform: 'darwin', execPath: older, cliPath: '/x/cli.js', hookNode: undefined }).node, older);
+    assert.equal(
+      hookRunner({ platform: 'darwin', execPath: cellarNode, cliPath: '/x/cli.js', hookNode: undefined }).node,
+      join(prefix, 'opt', 'node', 'bin', 'node'),
+    );
+  });
+
+  // fnm puts a per-shell directory on PATH (fnm_multishells/<pid>_<time>/bin)
+  // that links to the running node and is deleted with the shell. Baked from
+  // there, the hook would lose its node once that terminal closes.
+  test('a symlink to the running node on PATH is not baked', () => {
+    const real = join(realpathSync(tempDir('agentdef-fnm-')), 'node-versions', 'v22', 'installation', 'bin', 'node');
+    mkdirSync(dirname(real), { recursive: true });
+    writeFileSync(real, '');
+    const multishell = join(tempDir('agentdef-fnm-multishells-'), '12345_1700000000000', 'bin');
+    mkdirSync(multishell, { recursive: true });
+    symlinkSync(real, join(multishell, 'node'));
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${multishell}${delimiter}${savedPath}`;
+    try {
+      assert.equal(hookRunner({ platform: 'darwin', execPath: real, cliPath: '/x/cli.js', hookNode: undefined }).node, real);
+    } finally {
+      process.env.PATH = savedPath;
+    }
   });
 
   // A hook passes the node it started sync with. A GUI client's PATH has no
-  // node at all, so a choice made from PATH alone gave a GUI run another name
+  // node at all, so a choice that depends on PATH gave a GUI run another name
   // than the terminal run before it, and each rewrote the hooks to its own.
-  test('the node a hook started sync with wins, whatever PATH holds', () => {
-    const prefix = tempDir('agentdef-hook-node-');
-    const real = join(prefix, 'Cellar', 'node', '25.6.1', 'bin', 'node');
-    mkdirSync(dirname(real), { recursive: true });
+  test('the node a hook started sync with comes first', () => {
+    const { prefix, cellarNode } = brew('node', '25.6.1');
     mkdirSync(join(prefix, 'bin'));
-    writeFileSync(real, '');
-    symlinkSync(real, join(prefix, 'bin', 'node'));
-    const execPath = realpathSync(real);
-    const source = { platform: 'darwin' as const, execPath, cliPath: '/x/cli.js', pathEnv: GUI_PATH };
+    symlinkSync(join('..', 'Cellar', 'node', '25.6.1', 'bin', 'node'), join(prefix, 'bin', 'node'));
+    const source = { platform: 'darwin' as const, execPath: cellarNode, cliPath: '/x/cli.js' };
 
     assert.equal(hookRunner({ ...source, hookNode: join(prefix, 'bin', 'node') }).node, join(prefix, 'bin', 'node'));
-    assert.equal(hookRunner({ ...source, hookNode: undefined }).node, execPath, 'without it, the GUI PATH offers nothing');
+    assert.equal(hookRunner({ ...source, hookNode: undefined }).node, join(prefix, 'opt', 'node', 'bin', 'node'));
   });
 
   // Inherited by a sync that some other node runs, the variable names a
@@ -238,7 +254,7 @@ describe('hook text: which agentdef a hook calls', () => {
     writeFileSync(join(prefix, 'b', 'node'), '');
     const execPath = realpathSync(join(prefix, 'a', 'node'));
 
-    assert.equal(hookRunner({ platform: 'darwin', execPath, cliPath: '/x/cli.js', pathEnv: '', hookNode: join(prefix, 'b', 'node') }).node, execPath);
+    assert.equal(hookRunner({ platform: 'darwin', execPath, cliPath: '/x/cli.js', hookNode: join(prefix, 'b', 'node') }).node, execPath);
   });
 });
 
