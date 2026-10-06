@@ -88,7 +88,14 @@ export function missingRunnerPaths(runner) {
 // is not the running node and is passed over. An nvm PATH entry is the
 // versioned binary itself, so nothing changes there. Relative PATH entries are
 // skipped, a hook runs in another directory.
-function stableNodePath(execPath, pathEnv) {
+//
+// The node a hook started this sync with comes first, when it is the running
+// binary. The PATH a sync sees is whatever started it, and a hook run by a GUI
+// client has the bare system PATH, without the symlink a terminal has. Looked up
+// there alone, the name changed with every switch between GUI and terminal, and
+// each sync rewrote all four hooks to its own, the GUI one being the Cellar path
+// this lookup exists to avoid.
+function stableNodePath(execPath, pathEnv, hookNode) {
     let running;
     try {
         running = realpathSync(execPath);
@@ -96,19 +103,35 @@ function stableNodePath(execPath, pathEnv) {
     catch {
         return execPath; // not on disk (an injected path), nothing to compare with
     }
+    if (hookNode && isAbsolute(hookNode) && resolvesTo(hookNode, running))
+        return hookNode;
     for (const dir of pathEnv.split(delimiter)) {
         if (!isAbsolute(dir))
             continue;
         const candidate = join(dir, basename(execPath));
-        try {
-            if (realpathSync(candidate) === running)
-                return candidate;
-        }
-        catch {
-            // no such file in this PATH entry
-        }
+        if (resolvesTo(candidate, running))
+            return candidate;
     }
     return execPath;
+}
+// Whether `path` is the binary at the resolved path `running`. False when it
+// does not exist.
+function resolvesTo(path, running) {
+    try {
+        return realpathSync(path) === running;
+    }
+    catch {
+        return false;
+    }
+}
+// Whether two node paths name the same binary on disk.
+function sameBinary(a, b) {
+    try {
+        return resolvesTo(a, realpathSync(b));
+    }
+    catch {
+        return false;
+    }
 }
 // Platform and paths are parameters so the Windows rendering can be tested on
 // any OS. Git for Windows runs hooks in Git Bash, which executes
@@ -119,7 +142,7 @@ export function hookRunner(source = {}) {
     const platform = source.platform ?? process.platform;
     const forShell = (path) => (platform === 'win32' ? path.replace(/\\/g, '/') : path);
     return {
-        node: forShell(stableNodePath(source.execPath ?? process.execPath, source.pathEnv ?? process.env.PATH ?? '')),
+        node: forShell(stableNodePath(source.execPath ?? process.execPath, source.pathEnv ?? process.env.PATH ?? '', 'hookNode' in source ? source.hookNode : process.env.AGENTDEF_HOOK_NODE)),
         cli: forShell(source.cliPath ?? ownCliPath()),
     };
 }
@@ -128,6 +151,12 @@ export function hookRunner(source = {}) {
 // spaces (Program Files) and can contain quotes (a home directory for O'Brien).
 function shellQuote(value) {
     return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+// The node path in a hook of ours, or undefined when it has none (written
+// before 0.8.6) or the line is not in shellQuote's form.
+function bakedNode(hook) {
+    const quoted = /^AGENTDEF_NODE=('(?:[^'\n]|'\\'')*')$/m.exec(hook)?.[1];
+    return quoted === undefined ? undefined : quoted.slice(1, -1).replace(/'\\''/g, "'");
 }
 // The baked paths first, PATH second, and when neither yields agentdef, loud:
 // stderr for a terminal, plus a line in SYNC_SKIPPED for everyone else, which
@@ -139,12 +168,15 @@ function shellQuote(value) {
 // file (refreshHooks), and bash reads a script incrementally. exec cannot take a
 // shell function, which is why the guard calls agentdef_sync and the exec sits
 // inside it, never returning.
+//
+// AGENTDEF_HOOK_NODE tells that sync which name of node started it, so it
+// bakes the same name again, see stableNodePath.
 function runnerBlock(runner) {
     return `AGENTDEF_NODE=${shellQuote(runner.node)}
 AGENTDEF_CLI=${shellQuote(runner.cli)}
 agentdef_sync() {
   if [ -x "$AGENTDEF_NODE" ] && [ -f "$AGENTDEF_CLI" ]; then
-    exec "$AGENTDEF_NODE" "$AGENTDEF_CLI" sync
+    AGENTDEF_HOOK_NODE="$AGENTDEF_NODE" exec "$AGENTDEF_NODE" "$AGENTDEF_CLI" sync
   fi
   if command -v agentdef >/dev/null 2>&1; then
     exec agentdef sync
@@ -355,8 +387,18 @@ export function refreshHooks(dir, runner = hookRunner()) {
             notRefreshed: `git hooks not refreshed: ${problem}, so they keep watching the knowledge dir they were written for.`,
         };
     }
-    const wanted = buildHooks(knowledgeDir, runner);
-    const stale = [...ours].filter(([name, text]) => text !== wanted[name]).map(([name]) => name);
+    // A node path already in a hook stays when it is the binary this agentdef
+    // runs on. Another name for the same node (a symlink, whichever name the
+    // PATH of the last sync offered) is no reason to rewrite, and replacing it
+    // whenever this sync would have picked a different name made the hooks flip
+    // between GUI and terminal runs.
+    const wanted = new Map();
+    for (const [name, text] of ours) {
+        const baked = bakedNode(text);
+        const node = baked !== undefined && sameBinary(baked, runner.node) ? baked : runner.node;
+        wanted.set(name, buildHooks(knowledgeDir, { node, cli: runner.cli })[name]);
+    }
+    const stale = [...ours].filter(([name, text]) => text !== wanted.get(name)).map(([name]) => name);
     if (stale.length === 0)
         return none;
     const missing = missingRunnerPaths(runner);
@@ -367,6 +409,6 @@ export function refreshHooks(dir, runner = hookRunner()) {
         };
     }
     for (const name of stale)
-        writeHook(join(hooksDir, name), wanted[name]);
+        writeHook(join(hooksDir, name), wanted.get(name));
     return { refreshed: stale, notRefreshed: '' };
 }

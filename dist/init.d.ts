@@ -7,6 +7,7 @@ export interface HookRunnerSource {
     execPath?: string;
     cliPath?: string;
     pathEnv?: string;
+    hookNode?: string;
 }
 export declare function missingRunnerPaths(runner: HookRunner): string[];
 export declare function hookRunner(source?: HookRunnerSource): HookRunner;

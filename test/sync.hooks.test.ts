@@ -7,9 +7,9 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, existsSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { init, buildHooks, hookRunner, HOOK_NAMES, type HookRunner } from '../src/init.js';
 import { sync } from '../src/sync.js';
 
@@ -124,6 +124,39 @@ describe('sync refreshes the hooks agentdef installed', () => {
 
     assert.equal(res.written.filter((w) => REFRESHED.test(w)).length, 0);
     assert.equal(readFileSync(hook(root, 'post-commit'), 'utf-8'), before);
+  });
+
+  // Which name of node a sync would pick depends on how it was started (a
+  // terminal's PATH, a GUI client's, the hook's own). A hook whose node is the
+  // binary this sync runs on works either way; rewriting it to this sync's
+  // choice made the hooks flip with every switch between GUI and terminal.
+  test('a baked node that is another name for the running binary is kept', () => {
+    const root = fixture();
+    const runner = installedRunner();
+    const bin = mkdtempSync(join(tmpdir(), 'agentdef-node-link-'));
+    dirs.push(bin);
+    symlinkSync(process.execPath, join(bin, 'node'));
+    init(root, { node: join(bin, 'node'), cli: runner.cli });
+    const before = HOOK_NAMES.map((name) => readFileSync(hook(root, name), 'utf-8'));
+
+    const res = sync(root, { runner });
+
+    assert.equal(res.written.filter((w) => REFRESHED.test(w)).length, 0);
+    assert.deepEqual(HOOK_NAMES.map((name) => readFileSync(hook(root, name), 'utf-8')), before);
+  });
+
+  test('a baked node that is another binary is replaced', () => {
+    const root = fixture();
+    const runner = installedRunner();
+    const other = join(mkdtempSync(join(tmpdir(), 'agentdef-other-node-')), 'node');
+    dirs.push(dirname(other));
+    writeFileSync(other, '');
+    init(root, { node: other, cli: runner.cli });
+
+    const res = sync(root, { runner });
+
+    assert.deepEqual(res.written.filter((w) => REFRESHED.test(w)), [`git hooks refreshed: ${HOOK_NAMES.join(', ')}`]);
+    assert.equal(readFileSync(hook(root, 'post-commit'), 'utf-8'), buildHooks('knowledge', runner)['post-commit']);
   });
 
   // Same knowledge dir logic as init: renaming it in agent.yaml used to need a

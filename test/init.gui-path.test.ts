@@ -210,6 +210,36 @@ describe('hook text: which agentdef a hook calls', () => {
 
     assert.equal(hookRunner({ platform: 'darwin', execPath, cliPath: '/x/cli.js', pathEnv: join(prefix, 'shims') }).node, execPath);
   });
+
+  // A hook passes the node it started sync with. A GUI client's PATH has no
+  // node at all, so a choice made from PATH alone gave a GUI run another name
+  // than the terminal run before it, and each rewrote the hooks to its own.
+  test('the node a hook started sync with wins, whatever PATH holds', () => {
+    const prefix = tempDir('agentdef-hook-node-');
+    const real = join(prefix, 'Cellar', 'node', '25.6.1', 'bin', 'node');
+    mkdirSync(dirname(real), { recursive: true });
+    mkdirSync(join(prefix, 'bin'));
+    writeFileSync(real, '');
+    symlinkSync(real, join(prefix, 'bin', 'node'));
+    const execPath = realpathSync(real);
+    const source = { platform: 'darwin' as const, execPath, cliPath: '/x/cli.js', pathEnv: GUI_PATH };
+
+    assert.equal(hookRunner({ ...source, hookNode: join(prefix, 'bin', 'node') }).node, join(prefix, 'bin', 'node'));
+    assert.equal(hookRunner({ ...source, hookNode: undefined }).node, execPath, 'without it, the GUI PATH offers nothing');
+  });
+
+  // Inherited by a sync that some other node runs, the variable names a
+  // binary that is not running, and baking it would switch the hooks to it.
+  test('a hook node that is another binary is ignored', () => {
+    const prefix = tempDir('agentdef-hook-node-other-');
+    mkdirSync(join(prefix, 'a'));
+    mkdirSync(join(prefix, 'b'));
+    writeFileSync(join(prefix, 'a', 'node'), '');
+    writeFileSync(join(prefix, 'b', 'node'), '');
+    const execPath = realpathSync(join(prefix, 'a', 'node'));
+
+    assert.equal(hookRunner({ platform: 'darwin', execPath, cliPath: '/x/cli.js', pathEnv: '', hookNode: join(prefix, 'b', 'node') }).node, execPath);
+  });
 });
 
 describe('hook behaviour with a GUI client PATH (real commits)', () => {
@@ -280,5 +310,67 @@ describe('hook behaviour with a GUI client PATH (real commits)', () => {
     assert.equal(r.status, 0);
     assert.doesNotMatch(r.stderr, /agentdef/);
     assert.ok(!existsSync(join(root, '.agentdef', 'sync-skipped')));
+  });
+});
+
+// A sync the hook starts runs under the GUI client's PATH, a sync from a
+// terminal under the shell's. Each used to pick the node name its own PATH
+// offered and rewrite all four hooks to it: the GUI run baked the versioned
+// Cellar path that the next `brew upgrade node` deletes, the terminal run baked
+// the symlink back, and every switch printed "git hooks refreshed".
+describe('the hooks stay put between GUI and terminal syncs (real commits)', () => {
+  // An installed agentdef as far as the hooks can tell: a CLI entry that
+  // exists, running this branch's sync with the default node choice. Only the
+  // CLI path is fixed, the tsx default (src/cli.js) does not exist. Each run
+  // appends what sync reported to `log`.
+  function sourceInstall(): { cli: string; log: string } {
+    const base = realpathSync(tempDir('agentdef-source-install-'));
+    const cli = join(base, 'cli.mjs');
+    const log = join(base, 'runs.log');
+    writeFileSync(
+      cli,
+      [
+        `import { appendFileSync } from 'node:fs';`,
+        `import { register } from ${JSON.stringify(import.meta.resolve('tsx/esm/api'))};`,
+        `register();`,
+        `const { sync } = await import(${JSON.stringify(import.meta.resolve('../src/sync.ts'))});`,
+        `const { hookRunner } = await import(${JSON.stringify(import.meta.resolve('../src/init.ts'))});`,
+        `const res = sync(process.cwd(), { runner: hookRunner({ cliPath: process.argv[1] }) });`,
+        `appendFileSync(${JSON.stringify(log)}, JSON.stringify([...res.written, ...res.warnings]) + '\\n');`,
+      ].join('\n'),
+    );
+    return { cli, log };
+  }
+
+  test('a hook run under the bare GUI PATH and a terminal sync both leave them unchanged', () => {
+    const root = fixture();
+    write(root, { '.agent-adapters': 'claude-code\n' });
+    // The symlink a terminal has on PATH, /opt/homebrew/bin/node say, pointing
+    // at the node that runs these tests.
+    const bin = tempDir('agentdef-node-link-');
+    symlinkSync(process.execPath, join(bin, 'node'));
+    const { cli, log } = sourceInstall();
+    init(root, { node: join(bin, 'node'), cli });
+    const hooks = () => HOOK_NAMES.map((name) => readFileSync(join(root, '.git', 'hooks', name), 'utf-8'));
+    const before = hooks();
+
+    const gui = commitSkill(root, GUI_PATH);
+
+    assert.equal(gui.status, 0, gui.stderr);
+    const runs = () => readFileSync(log, 'utf-8').trim().split('\n').map((l) => JSON.parse(l) as string[]);
+    assert.equal(runs().length, 1, `the hook ran sync: ${gui.stderr}`);
+    assert.deepEqual(runs()[0].filter((l) => /git hooks/.test(l)), [], 'nothing refreshed, nothing warned');
+    assert.deepEqual(hooks(), before);
+
+    const terminal = spawnSync(join(bin, 'node'), [cli], {
+      cwd: root,
+      encoding: 'utf-8',
+      env: { ...process.env, ...GIT_ENV_OVERRIDES, PATH: `${bin}${delimiter}${process.env.PATH}` },
+    });
+
+    assert.equal(terminal.status, 0, terminal.stderr);
+    assert.equal(runs().length, 2);
+    assert.deepEqual(runs()[1].filter((l) => /git hooks/.test(l)), []);
+    assert.deepEqual(hooks(), before);
   });
 });
