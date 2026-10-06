@@ -1,4 +1,4 @@
-import { writeFileSync, readFileSync, existsSync, chmodSync, mkdirSync, rmSync, realpathSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, chmodSync, mkdirSync, rmSync, realpathSync, renameSync } from 'node:fs';
 import { join, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -322,9 +322,21 @@ function hookKnowledgeDir(cwd: string): string {
   return knowledgeDir;
 }
 
+// Written beside the hook and renamed over it. sync rewrites hooks while git
+// may be running one: a terminal `git pull` in post-merge while a GUI commit's
+// sync refreshes it. Truncating and rewriting in place could hand that bash
+// half a script; after a rename it keeps reading the old file to its end. When
+// any step fails the temp file goes, and the hook stays as it was.
 function writeHook(path: string, body: string): void {
-  writeFileSync(path, body);
-  chmodSync(path, 0o755);
+  const temp = `${path}.tmp-${process.pid}`;
+  try {
+    writeFileSync(temp, body);
+    chmodSync(temp, 0o755);
+    renameSync(temp, path);
+  } catch (err) {
+    rmSync(temp, { force: true });
+    throw err;
+  }
 }
 
 // Install agentdef's git hooks into the repo's local .git/hooks. If a custom
@@ -483,6 +495,26 @@ export function refreshHooks(dir: string, runner: HookRunner = hookRunner()): Ho
       current: false,
     };
   }
-  for (const name of stale) writeHook(join(hooksDir, name), wanted.get(name) as string);
-  return { refreshed: stale, notRefreshed: '', current: true };
+  // A hook that cannot be written (a read-only .git, a hook another process
+  // holds open on Windows) is a warning, for the same reason as the knowledge
+  // dir above: every output is written, and exit 1 would fail a sync that did
+  // its job, and `git checkout` with it. The next sync tries again.
+  const refreshed: HookName[] = [];
+  const failed: string[] = [];
+  for (const name of stale) {
+    try {
+      writeHook(join(hooksDir, name), wanted.get(name) as string);
+      refreshed.push(name);
+    } catch (err) {
+      failed.push(`${name} (${(err as Error).message})`);
+    }
+  }
+  if (failed.length > 0) {
+    return {
+      refreshed,
+      notRefreshed: `git hooks not refreshed, could not write ${failed.join(', ')}. They keep calling the agentdef they were written for.`,
+      current: false,
+    };
+  }
+  return { refreshed, notRefreshed: '', current: true };
 }

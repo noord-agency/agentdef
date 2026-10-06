@@ -7,7 +7,21 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, existsSync, statSync, symlinkSync } from 'node:fs';
+import {
+  mkdtempSync,
+  writeFileSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  existsSync,
+  statSync,
+  symlinkSync,
+  chmodSync,
+  openSync,
+  readSync,
+  closeSync,
+  readdirSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { init, buildHooks, hookRunner, HOOK_NAMES, type HookRunner } from '../src/init.js';
@@ -124,6 +138,59 @@ describe('sync refreshes the hooks agentdef installed', () => {
 
     assert.equal(res.written.filter((w) => REFRESHED.test(w)).length, 0);
     assert.equal(readFileSync(hook(root, 'post-commit'), 'utf-8'), before);
+  });
+
+  // git may be running a hook while sync rewrites it (a terminal pull in
+  // post-merge, a GUI commit's sync refreshing). Rewritten in place, that bash
+  // could read half a script. Replaced by a rename, it reads the old file to
+  // its end.
+  test('a refresh replaces the file, a reader of the old hook still gets all of it', () => {
+    const root = fixture();
+    const runner = installedRunner();
+    init(root, runner);
+    writeFileSync(hook(root, 'post-merge'), OLD_POST_MERGE);
+    const reader = openSync(hook(root, 'post-merge'), 'r');
+
+    try {
+      sync(root, { runner });
+      const buf = Buffer.alloc(OLD_POST_MERGE.length + 100);
+      const n = readSync(reader, buf, 0, buf.length, 0);
+      assert.equal(buf.subarray(0, n).toString('utf-8'), OLD_POST_MERGE);
+    } finally {
+      closeSync(reader);
+    }
+    assert.equal(readFileSync(hook(root, 'post-merge'), 'utf-8'), buildHooks('knowledge', runner)['post-merge']);
+    assert.equal(statSync(hook(root, 'post-merge')).mode & 0o777, 0o755);
+    assert.deepEqual(readdirSync(join(root, '.git', 'hooks')).filter((f) => f.includes('.tmp-')), [], 'no temp file left');
+  });
+
+  // Same reasoning as an invalid knowledge dir: by then every output is
+  // written, and exit 1 would fail a sync that did its job, become the exit
+  // status of `git checkout` through post-checkout, and keep the skip record.
+  test('a hook that cannot be written is a warning, the sync itself completes', () => {
+    const root = fixture();
+    const runner = installedRunner();
+    init(root, runner);
+    writeFileSync(hook(root, 'post-merge'), OLD_POST_MERGE);
+    write(root, { '.agentdef/sync-skipped': '2026-10-01T08:00:00Z post-commit: agentdef not found (PATH=/usr/bin)\n' });
+    const hooksDir = join(root, '.git', 'hooks');
+    chmodSync(hooksDir, 0o555);
+
+    let res;
+    try {
+      res = sync(root, { runner });
+    } finally {
+      chmodSync(hooksDir, 0o755);
+    }
+
+    assert.ok(res.written.includes('CLAUDE.md'), 'the outputs were written');
+    assert.equal(res.written.filter((w) => REFRESHED.test(w)).length, 0);
+    const warning = res.warnings.find((w) => NOT_REFRESHED.test(w));
+    assert.ok(warning, 'the stale hook must be reported');
+    assert.match(warning, /could not write post-merge \(EACCES/);
+    assert.equal(readFileSync(hook(root, 'post-merge'), 'utf-8'), OLD_POST_MERGE);
+    assert.deepEqual(readdirSync(hooksDir).filter((f) => f.includes('.tmp-')), []);
+    assert.ok(!existsSync(join(root, '.agentdef', 'sync-skipped')), 'the skipped sync has caught up');
   });
 
   // Which name of node a sync would pick depends on how it was started (a
